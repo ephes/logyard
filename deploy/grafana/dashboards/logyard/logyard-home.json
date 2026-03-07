@@ -35,22 +35,571 @@
     {
       "datasource": null,
       "gridPos": {
-        "h": 16,
+        "h": 6,
         "w": 24,
         "x": 0,
         "y": 0
       },
       "id": 1,
       "options": {
-        "content": "## Logyard Overview\n\nLogyard is the shared homelab log platform.\n\nPrimary operator workflow:\n- open **Grafana Explore**\n- pick datasource **Logyard Loki**\n- start with a low-cardinality selector\n\nStarter LogQL queries:\n\n```logql\n{host=\"macmini\"}\n```\n\n```logql\n{host=\"macmini\", service=\"logyard\"}\n```\n\n```logql\n{host=\"macmini\", level=~\"err|error|crit|critical\"}\n```\n\n```logql\n{host=\"macmini\", service=\"vector\"} |= \"error\"\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**\n- backup scope: **Loki data is out of backup scope in MVP**\n\nUse the Logyard runbooks in `ops-control/docs/` for deploy, ingest verification, retention checks, and troubleshooting.",
+        "content": "## Logyard Overview\n\nLogyard is the homelab log search and live-tail surface backed by Loki.\n\n**Use this dashboard for the first look. Use Grafana Explore for deep filtering and ad-hoc search.**\n\nStarter LogQL queries:\n\n```logql\n{source_type=\"journald\"}\n```\n\n```logql\n{source_type=\"journald\", service=\"vector\"} |= \"error\"\n```\n\n```logql\n{source_type=\"journald\", level=~\"error|critical|alert|emerg\"}\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**",
         "mode": "markdown"
       },
       "pluginVersion": "12.4.0",
       "title": "Operator Notes",
       "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({source_type=\"journald\"}[5m]))",
+          "legendFormat": "lines",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Log Lines (5m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({source_type=\"journald\", level=~\"error|critical|alert|emerg\"}[15m]))",
+          "legendFormat": "errors",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Errors (15m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "count(sum by (service) (count_over_time({source_type=\"journald\"}[15m])))",
+          "legendFormat": "services",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Services (15m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "count(sum by (host) (count_over_time({source_type=\"journald\"}[15m])))",
+          "legendFormat": "hosts",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Hosts (15m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "id": 6,
+      "options": {
+        "displayMode": "basic",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": false,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(8, sum by (service) (count_over_time({source_type=\"journald\"}[15m])))",
+          "legendFormat": "{{service}}",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Services (15m)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (level) (count_over_time({source_type=\"journald\", level=~\"debug|info|notice|warning|error|critical|alert|emerg\"}[5m]))",
+          "legendFormat": "{{level}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Log Volume by Level",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 8,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "{source_type=\"journald\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "logyard-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "id": 9,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "logyard-loki"
+          },
+          "editorMode": "code",
+          "expr": "{source_type=\"journald\", level=~\"error|critical|alert|emerg\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Errors and Critical Logs",
+      "type": "logs"
     }
   ],
-  "refresh": "1m",
+  "refresh": "10s",
   "schemaVersion": 41,
   "tags": [
     "logyard",
@@ -60,13 +609,13 @@
     "list": []
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Logyard Overview",
   "uid": "logyard-home",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

@@ -46,10 +46,12 @@ docs/
 
 ## Grafana Assets
 
-`deploy/grafana/dashboards/logyard/logyard-home.json` is a small landing dashboard for Grafana.
+`deploy/grafana/dashboards/logyard/logyard-home.json` is the Logyard landing dashboard for Grafana.
 It is not intended to replace Explore. It gives operators:
 
 - a stable bookmarkable entrypoint for Logyard
+- live recent-log and error-log panels
+- quick volume/status panels for hosts and services
 - starter LogQL queries
 - the documented scope and retention policy in the UI
 
