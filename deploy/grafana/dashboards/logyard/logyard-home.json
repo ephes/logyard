@@ -1,0 +1,72 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Grafana Explore",
+      "type": "link",
+      "url": "/explore"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": null,
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "content": "## Logyard Overview\n\nLogyard is the shared homelab log platform.\n\nPrimary operator workflow:\n- open **Grafana Explore**\n- pick datasource **Logyard Loki**\n- start with a low-cardinality selector\n\nStarter LogQL queries:\n\n```logql\n{host=\"macmini\"}\n```\n\n```logql\n{host=\"macmini\", service=\"logyard\"}\n```\n\n```logql\n{host=\"macmini\", level=~\"err|error|crit|critical\"}\n```\n\n```logql\n{host=\"macmini\", service=\"vector\"} |= \"error\"\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**\n- backup scope: **Loki data is out of backup scope in MVP**\n\nUse the Logyard runbooks in `ops-control/docs/` for deploy, ingest verification, retention checks, and troubleshooting.",
+        "mode": "markdown"
+      },
+      "pluginVersion": "12.4.0",
+      "title": "Operator Notes",
+      "type": "text"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "tags": [
+    "logyard",
+    "logs"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Logyard Overview",
+  "uid": "logyard-home",
+  "version": 1,
+  "weekStart": ""
+}
