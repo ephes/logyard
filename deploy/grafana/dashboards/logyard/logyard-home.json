@@ -42,7 +42,7 @@
       },
       "id": 1,
       "options": {
-        "content": "## Logyard Overview\n\nLogyard is the homelab log search and live-tail surface backed by Loki.\n\n**Use this dashboard for the first look. Use Grafana Explore for deep filtering and ad-hoc search.**\n\nStarter LogQL queries:\n\n```logql\n{source_type=\"journald\"}\n```\n\n```logql\n{source_type=\"journald\", service=\"vector\"} |= \"error\"\n```\n\n```logql\n{source_type=\"journald\", level=~\"error|critical|alert|emerg\"}\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**",
+        "content": "## Logyard Overview\n\nLogyard is the homelab log search and live-tail surface backed by Loki.\n\n**Use this dashboard for the first look. Use Grafana Explore for deep filtering and ad-hoc search.**\n\nDashboard filters:\n- `host` narrows the current producer host\n- `service` narrows systemd/syslog services within the selected host\n- `level` narrows the current log stream and line counters without replacing the dedicated error panels\n\nStarter LogQL queries:\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\"} |= \"error\"\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"error|critical|alert|emerg\"}\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**",
         "mode": "markdown"
       },
       "pluginVersion": "12.4.0",
@@ -112,7 +112,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({source_type=\"journald\"}[5m]))",
+          "expr": "sum(count_over_time({source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}[5m]))",
           "legendFormat": "lines",
           "queryType": "instant",
           "refId": "A"
@@ -184,7 +184,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({source_type=\"journald\", level=~\"error|critical|alert|emerg\"}[15m]))",
+          "expr": "sum(count_over_time({source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"error|critical|alert|emerg\"}[15m]))",
           "legendFormat": "errors",
           "queryType": "instant",
           "refId": "A"
@@ -248,7 +248,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "count(sum by (service) (count_over_time({source_type=\"journald\"}[15m])))",
+          "expr": "count(sum by (service) (count_over_time({source_type=\"journald\", host=~\"$host\", level=~\"$level\"}[15m])))",
           "legendFormat": "services",
           "queryType": "instant",
           "refId": "A"
@@ -312,7 +312,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "count(sum by (host) (count_over_time({source_type=\"journald\"}[15m])))",
+          "expr": "count(sum by (host) (count_over_time({source_type=\"journald\", service=~\"$service\", level=~\"$level\"}[15m])))",
           "legendFormat": "hosts",
           "queryType": "instant",
           "refId": "A"
@@ -377,7 +377,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "topk(8, sum by (service) (count_over_time({source_type=\"journald\"}[15m])))",
+          "expr": "topk(8, sum by (service) (count_over_time({source_type=\"journald\", host=~\"$host\", level=~\"$level\"}[15m])))",
           "legendFormat": "{{service}}",
           "queryType": "instant",
           "refId": "A"
@@ -469,7 +469,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (level) (count_over_time({source_type=\"journald\", level=~\"debug|info|notice|warning|error|critical|alert|emerg\"}[5m]))",
+          "expr": "sum by (level) (count_over_time({source_type=\"journald\", host=~\"$host\", service=~\"$service\"}[5m]))",
           "legendFormat": "{{level}}",
           "queryType": "range",
           "refId": "A"
@@ -530,7 +530,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "{source_type=\"journald\"}",
+          "expr": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
           "queryType": "range",
           "refId": "A"
         }
@@ -590,7 +590,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "{source_type=\"journald\", level=~\"error|critical|alert|emerg\"}",
+          "expr": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"error|critical|alert|emerg\"}",
           "queryType": "range",
           "refId": "A"
         }
@@ -606,7 +606,83 @@
     "logs"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "logyard-loki"
+        },
+        "definition": "label_values({source_type=\"journald\"}, host)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Host",
+        "multi": false,
+        "name": "host",
+        "options": [],
+        "query": "label_values({source_type=\"journald\"}, host)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "logyard-loki"
+        },
+        "definition": "label_values({source_type=\"journald\", host=~\"$host\"}, service)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Service",
+        "multi": false,
+        "name": "service",
+        "options": [],
+        "query": "label_values({source_type=\"journald\", host=~\"$host\"}, service)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "logyard-loki"
+        },
+        "definition": "label_values({source_type=\"journald\", host=~\"$host\", service=~\"$service\"}, level)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Level",
+        "multi": false,
+        "name": "level",
+        "options": [],
+        "query": "label_values({source_type=\"journald\", host=~\"$host\", service=~\"$service\"}, level)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-30m",
@@ -616,6 +692,6 @@
   "timezone": "",
   "title": "Logyard Overview",
   "uid": "logyard-home",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

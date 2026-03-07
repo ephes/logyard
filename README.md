@@ -50,6 +50,7 @@ docs/
 It is not intended to replace Explore. It gives operators:
 
 - a stable bookmarkable entrypoint for Logyard
+- lightweight `host` / `service` / `level` filters for the first triage pass
 - live recent-log and error-log panels
 - quick volume/status panels for hosts and services
 - starter LogQL queries
