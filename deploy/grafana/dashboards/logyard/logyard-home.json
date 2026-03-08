@@ -35,14 +35,14 @@
     {
       "datasource": null,
       "gridPos": {
-        "h": 6,
+        "h": 10,
         "w": 24,
         "x": 0,
         "y": 0
       },
       "id": 1,
       "options": {
-        "content": "## Logyard Overview\n\nLogyard is the homelab log search and live-tail surface backed by Loki.\n\n**Use this dashboard for the first look. Use Grafana Explore for deep filtering and ad-hoc search.**\n\nDashboard filters:\n- `host` narrows the current producer host\n- `service` narrows systemd/syslog services within the selected host\n- `level` narrows the current log stream and line counters without replacing the dedicated error panels\n\nStarter LogQL queries:\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\"} |= \"error\"\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"error|critical|alert|emerg\"}\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**",
+        "content": "## Logyard Overview\n\nLogyard is the homelab log search and live-tail surface backed by Loki.\n\n**Use this dashboard for the first look. Use Grafana Explore for deep filtering and ad-hoc search.**\n\nDashboard filters:\n- `host` narrows the current producer host\n- `service` narrows systemd/syslog services within the selected host\n- `level` narrows the current log stream and line counters without replacing the dedicated error panels\n\nExplore quick start:\n- **Builder mode**: choose labels like `host = macmini` from the dropdowns\n- **Code mode**: paste full LogQL queries like `{host=\"macmini\"}`\n- Do **not** paste `{host=\"macmini\"}` into the **Label browser** or **Line contains** fields\n- `|= \"text\"` searches inside the log message text, while `{host=\"macmini\"}` matches Loki labels\n\nStarter LogQL queries:\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}\n```\n\n```logql\n{host=\"macmini\"}\n```\n\n```logql\n{host=\"macmini\", service=\"graphyard-web\"}\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\"} |= \"error\"\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"error|critical|alert|emerg\"}\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**",
         "mode": "markdown"
       },
       "pluginVersion": "12.4.0",
@@ -692,6 +692,6 @@
   "timezone": "",
   "title": "Logyard Overview",
   "uid": "logyard-home",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }
