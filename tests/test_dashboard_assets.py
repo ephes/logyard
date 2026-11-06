@@ -44,6 +44,76 @@ class DashboardAssetTests(unittest.TestCase):
         self.dashboard["panels"].append(dict(id=99, title="Row", type="row", panels=[]))
         validate_dashboard(self.dashboard)
 
+    def test_duplicate_target_refids_including_rows(self):
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                dashboard = copy.deepcopy(self.dashboard)
+                panel = dashboard["panels"][1]
+                panel["targets"].append(copy.deepcopy(panel["targets"][0]))
+                if nested:
+                    dashboard["panels"][1] = dict(
+                        id=99, title="Row", type="row", panels=[panel],
+                    )
+                with self.assertRaisesRegex(ValueError, "duplicate target refId"):
+                    validate_dashboard(dashboard)
+
+    def test_target_refids_are_scoped_to_each_panel(self):
+        panel = self.dashboard["panels"][1]
+        other = copy.deepcopy(panel)
+        other["id"] = 100
+        self.dashboard["panels"].append(dict(
+            id=99, title="Row", type="row", panels=[other],
+        ))
+        extra = copy.deepcopy(panel["targets"][0])
+        extra["refId"] = "B"
+        panel["targets"].append(extra)
+        validate_dashboard(self.dashboard)
+
+    def test_query_panels_require_a_visible_target_including_rows(self):
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                dashboard = copy.deepcopy(self.dashboard)
+                panel = dashboard["panels"][1]
+                for target in panel["targets"]:
+                    target["hide"] = True
+                if nested:
+                    dashboard["panels"][1] = dict(
+                        id=99, title="Row", type="row", panels=[panel],
+                    )
+                with self.assertRaisesRegex(ValueError, "visible target"):
+                    validate_dashboard(dashboard)
+
+    def test_target_hide_must_be_boolean(self):
+        for hide in (None, 0, 1, "false", "true", [], {}):
+            with self.subTest(hide=hide):
+                dashboard = copy.deepcopy(self.dashboard)
+                panel = dashboard["panels"][1]
+                extra = copy.deepcopy(panel["targets"][0])
+                extra.update(refId="B", hide=hide)
+                panel["targets"].append(extra)
+                with self.assertRaisesRegex(ValueError, "hide must be a boolean"):
+                    validate_dashboard(dashboard)
+
+    def test_visible_targets_allow_hidden_helpers(self):
+        panel = self.dashboard["panels"][1]
+        hidden = copy.deepcopy(panel["targets"][0])
+        hidden.update(refId="B", hide=True)
+        panel["targets"].append(hidden)
+        for hide in (None, False):
+            with self.subTest(hide=hide):
+                if hide is None:
+                    panel["targets"][0].pop("hide", None)
+                else:
+                    panel["targets"][0]["hide"] = hide
+                validate_dashboard(self.dashboard)
+
+    def test_text_and_row_panels_need_no_targets(self):
+        self.dashboard["panels"] = [
+            dict(id=1, title="Text", type="text"),
+            dict(id=2, title="Row", type="row", panels=[]),
+        ]
+        validate_dashboard(self.dashboard)
+
     def test_required_fields(self):
         for path, key in (
             (("panels", 1), "id"), (("panels", 1), "type"),
