@@ -56,6 +56,17 @@ It is not intended to replace Explore. It gives operators:
 - starter LogQL queries
 - the documented scope and retention policy in the UI
 
+All query panels follow the selected `host` and `service`. The `level` filter
+also applies to Recent Logs, Log Lines, Active Services, Active Hosts and Top
+Services. The error panels always show their fixed error levels, and Log Volume
+by Level compares all levels within the selected host/service scope.
+
+Run the offline query regressions with Python 3.11+ (standard library only):
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
 ## Source of Truth
 
 Canonical platform design:

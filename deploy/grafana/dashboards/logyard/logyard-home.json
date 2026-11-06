@@ -42,7 +42,7 @@
       },
       "id": 1,
       "options": {
-        "content": "## Logyard Overview\n\nLogyard is the homelab log search and live-tail surface backed by Loki.\n\n**Use this dashboard for the first look. Use Grafana Explore for deep filtering and ad-hoc search.**\n\nDashboard filters:\n- `host` narrows the current producer host\n- `service` narrows systemd/syslog services within the selected host\n- `level` narrows the current log stream and line counters without replacing the dedicated error panels\n\nExplore quick start:\n- **Builder mode**: choose labels like `host = macmini` from the dropdowns\n- **Code mode**: paste full LogQL queries like `{host=\"macmini\"}`\n- Do **not** paste `{host=\"macmini\"}` into the **Label browser** or **Line contains** fields\n- `|= \"text\"` searches inside the log message text, while `{host=\"macmini\"}` matches Loki labels\n\nStarter LogQL queries:\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}\n```\n\n```logql\n{host=\"macmini\"}\n```\n\n```logql\n{host=\"macmini\", service=\"graphyard-web\"}\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\"} |= \"error\"\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"error|critical|alert|emerg\"}\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**",
+        "content": "## Logyard Overview\n\nLogyard is the homelab log search and live-tail surface backed by Loki.\n\n**Use this dashboard for the first look. Use Grafana Explore for deep filtering and ad-hoc search.**\n\nDashboard filters:\n- `host` narrows the current producer host\n- `service` narrows systemd/syslog services within the selected host\n- `host` and `service` scope every query panel, including active counts and Top Services\n- `level` scopes Recent Logs, Log Lines, active counts and Top Services\n- error panels keep their fixed error levels; Log Volume by Level compares all levels in the selected host/service scope\n\nExplore quick start:\n- **Builder mode**: choose labels like `host = macmini` from the dropdowns\n- **Code mode**: paste full LogQL queries like `{host=\"macmini\"}`\n- Do **not** paste `{host=\"macmini\"}` into the **Label browser** or **Line contains** fields\n- `|= \"text\"` searches inside the log message text, while `{host=\"macmini\"}` matches Loki labels\n\nStarter LogQL queries:\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}\n```\n\n```logql\n{host=\"macmini\"}\n```\n\n```logql\n{host=\"macmini\", service=\"graphyard-web\"}\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\"} |= \"error\"\n```\n\n```logql\n{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"error|critical|alert|emerg\"}\n```\n\nScope decisions:\n- retention: **14 days**\n- source scope: **journald first**\n- indexed labels: **host, service, source_type, environment, level**",
         "mode": "markdown"
       },
       "pluginVersion": "12.4.0",
@@ -248,7 +248,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "count(sum by (service) (count_over_time({source_type=\"journald\", host=~\"$host\", level=~\"$level\"}[15m])))",
+          "expr": "count(sum by (service) (count_over_time({source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}[15m])))",
           "legendFormat": "services",
           "queryType": "instant",
           "refId": "A"
@@ -312,7 +312,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "count(sum by (host) (count_over_time({source_type=\"journald\", service=~\"$service\", level=~\"$level\"}[15m])))",
+          "expr": "count(sum by (host) (count_over_time({source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}[15m])))",
           "legendFormat": "hosts",
           "queryType": "instant",
           "refId": "A"
@@ -377,7 +377,7 @@
             "uid": "logyard-loki"
           },
           "editorMode": "code",
-          "expr": "topk(8, sum by (service) (count_over_time({source_type=\"journald\", host=~\"$host\", level=~\"$level\"}[15m])))",
+          "expr": "topk(8, sum by (service) (count_over_time({source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}[15m])))",
           "legendFormat": "{{service}}",
           "queryType": "instant",
           "refId": "A"
