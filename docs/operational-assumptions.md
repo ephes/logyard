@@ -15,6 +15,11 @@ These assumptions are intentionally small and explicit so the deployment path st
 - Errors and Errors and Critical Logs retain the fixed `error|critical|alert|emerg` levels regardless of `level`.
 - Log Volume by Level compares all levels within the selected host/service scope.
 
+Dashboard changes must pass the offline asset check and query regressions listed
+in the README before adoption. CI checks asset structure and synthetic selector
+behavior; it does not provision Grafana or verify live Loki data. Deployment
+and live verification remain part of the operator adoption workflow.
+
 ## Ingestion
 
 - Vector is the standard producer.

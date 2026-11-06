@@ -61,11 +61,24 @@ also applies to Recent Logs, Log Lines, Active Services, Active Hosts and Top
 Services. The error panels always show their fixed error levels, and Log Volume
 by Level compares all levels within the selected host/service scope.
 
-Run the offline query regressions with Python 3.11+ (standard library only):
+Run the offline asset check and regressions from the repository root with
+Python 3.11+ (standard library only):
 
 ```sh
+python3 -m scripts.check_dashboard
 python3 -m unittest discover -s tests -v
 ```
+
+The asset check validates JSON, required dashboard/panel/query fields, unique
+panel ids (including nested rows), the `logyard-loki` datasource and defined
+variable references. Grafana's built-in annotation datasource is separate from
+the Loki query datasource. The check accepts `$name`, `${name:format}` and
+`[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
+It checks this asset's structure, not the full Grafana schema or LogQL syntax.
+Synthetic fixtures cover invalid assets and dropdown scope without network
+access, provisioning or real logs. GitHub Actions runs both commands on every
+push and pull request; either failure blocks a green run. There are no separate
+lint or type-check gates in this standard-library-only repository.
 
 ## Source of Truth
 
