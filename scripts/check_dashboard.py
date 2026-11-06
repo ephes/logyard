@@ -72,6 +72,7 @@ def validate_dashboard(dashboard):
                         f"panel {panel_id}: expected Loki datasource {LOKI}")
                 targets = panel.get("targets")
                 require(isinstance(targets, list) and targets, f"panel {panel_id}: missing targets")
+                ref_ids = set()
                 for target in targets:
                     require(isinstance(target, dict), f"panel {panel_id}: target must be an object")
                     require(target.get("datasource") == LOKI,
@@ -79,6 +80,14 @@ def validate_dashboard(dashboard):
                     for key in ("expr", "refId"):
                         require(isinstance(target.get(key), str) and target[key].strip(),
                                 f"panel {panel_id}: missing target {key}")
+                    ref_id = target["refId"]
+                    require(ref_id not in ref_ids,
+                            f"panel {panel_id}: duplicate target refId {ref_id}")
+                    ref_ids.add(ref_id)
+                    require("hide" not in target or type(target["hide"]) is bool,
+                            f"panel {panel_id}: target hide must be a boolean")
+                require(any(not target.get("hide", False) for target in targets),
+                        f"panel {panel_id}: needs at least one visible target")
             if "panels" in panel:
                 check_panels(panel["panels"])
 

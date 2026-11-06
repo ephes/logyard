@@ -70,8 +70,13 @@ python3 -m unittest discover -s tests -v
 ```
 
 The asset check validates JSON, required dashboard/panel/query fields, unique
-panel ids (including nested rows), the `logyard-loki` datasource and defined
-variable references. Grafana's built-in annotation datasource is separate from
+panel ids (including nested rows), unique target `refId` values within each
+query panel, the `logyard-loki` datasource and defined variable references.
+Different panels may reuse a target `refId`. Each query panel must have at least
+one visible target: `hide` must be a boolean when present and defaults to false
+when omitted. Hidden helper targets are allowed alongside a visible target;
+text and row panels do not need targets. These checks also apply inside rows.
+Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
 It checks this asset's structure, not the full Grafana schema or LogQL syntax.
