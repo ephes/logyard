@@ -76,9 +76,16 @@ Different panels may reuse a target `refId`. Each query panel must have at least
 one visible target: `hide` must be a boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target;
 text and row panels do not need targets. These checks also apply inside rows.
+Top-level panels must have positive-size integer `gridPos` rectangles within
+Grafana's 24-column grid and cannot overlap; touching edges are allowed. Row
+headers occupy that grid, while saved children inside collapsed rows are excluded
+from this geometry check. Expanded row children live at the top level and are
+checked there. Nested panels still receive the other structural checks.
 Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
+References between variable `query` strings must be acyclic, including no self-references;
+formatted references count as dependencies and built-in globals do not.
 It checks this asset's structure, not the full Grafana schema or LogQL syntax.
 Synthetic fixtures cover invalid assets and dropdown scope without network
 access, provisioning or real logs. GitHub Actions runs both commands on every

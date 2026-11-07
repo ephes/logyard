@@ -11,6 +11,13 @@ import unittest
 from scripts.check_dashboard import DEFAULT_PATH, validate_dashboard
 
 
+def row(children, collapsed=True):
+    return dict(
+        id=99, title="Row", type="row", panels=children, collapsed=collapsed,
+        gridPos=dict(x=0, y=100, w=24, h=1),
+    )
+
+
 class DashboardAssetTests(unittest.TestCase):
     def setUp(self):
         self.dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
@@ -33,7 +40,7 @@ class DashboardAssetTests(unittest.TestCase):
 
     def test_duplicate_panel_ids_including_rows(self):
         duplicate = copy.deepcopy(self.dashboard["panels"][1])
-        for panel in (duplicate, dict(id=99, title="Row", type="row", panels=[duplicate])):
+        for panel in (duplicate, row([duplicate])):
             with self.subTest(panel=panel["type"]):
                 dashboard = copy.deepcopy(self.dashboard)
                 dashboard["panels"].append(panel)
@@ -41,8 +48,57 @@ class DashboardAssetTests(unittest.TestCase):
                     validate_dashboard(dashboard)
 
     def test_expanded_row_with_top_level_children(self):
-        self.dashboard["panels"].append(dict(id=99, title="Row", type="row", panels=[]))
+        self.dashboard["panels"] = [
+            row([], collapsed=False),
+            dict(id=100, title="Child", type="text", gridPos=dict(x=0, y=101, w=24, h=2)),
+        ]
         validate_dashboard(self.dashboard)
+
+    def test_grid_overlap_is_rejected(self):
+        for x, y in ((5, 0), (0, 3), (5, 3), (0, 0)):
+            with self.subTest(x=x, y=y):
+                self.dashboard["panels"] = [
+                    dict(id=1, title="First", type="text", gridPos=dict(x=0, y=0, w=6, h=4)),
+                    dict(id=2, title="Second", type="text", gridPos=dict(x=x, y=y, w=6, h=4)),
+                ]
+                with self.assertRaisesRegex(ValueError, "panels 1 and 2 overlap"):
+                    validate_dashboard(self.dashboard)
+
+    def test_grid_touching_edges_are_allowed(self):
+        for x, y in ((6, 0), (0, 4), (6, 4)):
+            with self.subTest(x=x, y=y):
+                self.dashboard["panels"] = [
+                    dict(id=1, title="First", type="text", gridPos=dict(x=0, y=0, w=6, h=4)),
+                    dict(id=2, title="Second", type="text", gridPos=dict(x=x, y=y, w=6, h=4)),
+                ]
+                validate_dashboard(self.dashboard)
+
+    def test_grid_positions_are_bounded_integers(self):
+        for key, value in (("x", -1), ("y", -1), ("w", 0), ("h", 0),
+                           ("x", True), ("y", 1.5), ("w", "6"), ("w", 25)):
+            with self.subTest(key=key, value=value):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["panels"][0]["gridPos"][key] = value
+                with self.assertRaisesRegex(ValueError, "gridPos"):
+                    validate_dashboard(dashboard)
+        for value in (None, {}, dict(x=23, y=0, w=2, h=1)):
+            with self.subTest(gridPos=value):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["panels"][0]["gridPos"] = value
+                with self.assertRaisesRegex(ValueError, "gridPos"):
+                    validate_dashboard(dashboard)
+
+    def test_collapsed_row_children_do_not_occupy_top_level_grid(self):
+        child = copy.deepcopy(self.dashboard["panels"][0])
+        child["id"] = 100
+        # Saved child coordinates can intersect the row header while collapsed.
+        child["gridPos"] = dict(x=0, y=100, w=24, h=10)
+        self.dashboard["panels"].append(row([child]))
+        validate_dashboard(self.dashboard)
+        # The visible row header itself must not intersect another top-level panel.
+        self.dashboard["panels"][-1]["gridPos"]["y"] = 0
+        with self.assertRaisesRegex(ValueError, "panels 1 and 99 overlap"):
+            validate_dashboard(self.dashboard)
 
     def test_duplicate_target_refids_including_rows(self):
         for nested in (False, True):
@@ -51,9 +107,7 @@ class DashboardAssetTests(unittest.TestCase):
                 panel = dashboard["panels"][1]
                 panel["targets"].append(copy.deepcopy(panel["targets"][0]))
                 if nested:
-                    dashboard["panels"][1] = dict(
-                        id=99, title="Row", type="row", panels=[panel],
-                    )
+                    dashboard["panels"][1] = row([panel])
                 with self.assertRaisesRegex(ValueError, "duplicate target refId"):
                     validate_dashboard(dashboard)
 
@@ -61,9 +115,7 @@ class DashboardAssetTests(unittest.TestCase):
         panel = self.dashboard["panels"][1]
         other = copy.deepcopy(panel)
         other["id"] = 100
-        self.dashboard["panels"].append(dict(
-            id=99, title="Row", type="row", panels=[other],
-        ))
+        self.dashboard["panels"].append(row([other]))
         extra = copy.deepcopy(panel["targets"][0])
         extra["refId"] = "B"
         panel["targets"].append(extra)
@@ -77,9 +129,7 @@ class DashboardAssetTests(unittest.TestCase):
                 for target in panel["targets"]:
                     target["hide"] = True
                 if nested:
-                    dashboard["panels"][1] = dict(
-                        id=99, title="Row", type="row", panels=[panel],
-                    )
+                    dashboard["panels"][1] = row([panel])
                 with self.assertRaisesRegex(ValueError, "visible target"):
                     validate_dashboard(dashboard)
 
@@ -109,8 +159,8 @@ class DashboardAssetTests(unittest.TestCase):
 
     def test_text_and_row_panels_need_no_targets(self):
         self.dashboard["panels"] = [
-            dict(id=1, title="Text", type="text"),
-            dict(id=2, title="Row", type="row", panels=[]),
+            dict(id=1, title="Text", type="text", gridPos=dict(x=0, y=0, w=24, h=2)),
+            row([]),
         ]
         validate_dashboard(self.dashboard)
 
@@ -172,6 +222,27 @@ class DashboardAssetTests(unittest.TestCase):
         self.dashboard["templating"]["list"] = []
         with self.assertRaises(ValueError):
             validate_dashboard(self.dashboard)
+
+    def test_variable_dependency_cycles_are_rejected(self):
+        for reference in ("$service", "${service:regex}", "[[service:regex]]", "$host"):
+            with self.subTest(reference=reference):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][0]["query"] = reference
+                with self.assertRaisesRegex(ValueError, "variable dependency cycle"):
+                    validate_dashboard(dashboard)
+        # A longer cycle must also be rejected.
+        self.dashboard["templating"]["list"][0]["query"] = "$level"
+        with self.assertRaisesRegex(ValueError, "variable dependency cycle"):
+            validate_dashboard(self.dashboard)
+
+    def test_acyclic_formatted_dependencies_and_globals_are_allowed(self):
+        variables = self.dashboard["templating"]["list"]
+        variables[0]["query"] = "label_values({time=\"$__from\"}, host)"
+        variables[1]["query"] = 'label_values({host=~"${host:regex}"}, service)'
+        variables[2]["query"] = 'label_values({service=~"[[service:regex]]"}, level)'
+        # Declaration order does not determine the dependency order.
+        self.dashboard["templating"]["list"].reverse()
+        validate_dashboard(self.dashboard)
 
     def test_cli_rejects_bad_assets(self):
         invalid = copy.deepcopy(self.dashboard)
