@@ -261,5 +261,130 @@ class DashboardAssetTests(unittest.TestCase):
                     self.assertNotIn("Traceback", result.stderr)
 
 
+def synthetic_dashboard():
+    return dict(
+        uid="logyard-home", title="Synthetic", schemaVersion=1,
+        templating=dict(list=[
+            dict(name=name, type="query", query=f"label_values({name})",
+                 datasource=dict(type="loki", uid="logyard-loki"))
+            for name in ("host", "service", "level")
+        ]),
+        panels=[dict(id=1, title="Text", type="text",
+                     gridPos=dict(x=0, y=0, w=24, h=1))],
+    )
+
+
+class DashboardDepthTests(unittest.TestCase):
+    def test_extension_container_depth_boundary(self):
+        # The root object is depth 1; scalar values do not add container depth.
+        for kind in (dict, list):
+            for depth in (64, 65):
+                with self.subTest(kind=kind, depth=depth):
+                    dashboard = synthetic_dashboard()
+                    extension = "literal"
+                    for _ in range(depth - 1):
+                        extension = {"child": extension} if kind is dict else [extension]
+                    dashboard["extension"] = extension
+                    if depth == 64:
+                        validate_dashboard(dashboard)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "nesting.*64"):
+                            validate_dashboard(dashboard)
+
+    def test_cli_rejects_deep_extensions_and_rows_without_traceback(self):
+        extension = "literal"
+        for _ in range(80):
+            extension = {"child": [extension]}
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = extension
+        nested_rows = synthetic_dashboard()
+        for panel_id in range(2, 82):
+            parent = row(nested_rows["panels"])
+            parent["id"] = panel_id
+            nested_rows["panels"] = [parent]
+        # Construct raw JSON so the fixture encoder cannot hit its own limit.
+        decoding_depth = 10000
+        contents = (
+            json.dumps(dashboard), json.dumps(nested_rows),
+            json.dumps(synthetic_dashboard())[:-1] + ',"extension":'
+            + '[' * decoding_depth + '0' + ']' * decoding_depth + '}',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            for content in contents:
+                path.write_text(content, encoding="utf-8")
+                result = subprocess.run(
+                    [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                    cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True,
+                )
+                with self.subTest(prefix=content[:40]):
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("Invalid dashboard", result.stderr)
+                    self.assertIn("nesting", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
+    def test_cli_normalizes_decoding_and_validation_recursion(self):
+        from contextlib import redirect_stderr
+        import io
+        from unittest.mock import patch
+        from scripts.check_dashboard import main
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_text(json.dumps(synthetic_dashboard()), encoding="utf-8")
+            for target in ("json.loads", "validate_dashboard"):
+                with self.subTest(target=target):
+                    errors = io.StringIO()
+                    with patch.object(sys, "argv", ["check_dashboard", str(path)]), \
+                            patch(f"scripts.check_dashboard.{target}",
+                                  side_effect=RecursionError("implementation detail")), \
+                            redirect_stderr(errors):
+                        self.assertEqual(main(), 1)
+                    self.assertIn("Invalid dashboard", errors.getvalue())
+                    self.assertNotIn("implementation detail", errors.getvalue())
+                    self.assertNotIn("Traceback", errors.getvalue())
+
+
+class DashboardChildGridTests(unittest.TestCase):
+    def test_saved_child_grid_shapes_are_validated_at_each_level(self):
+        valid = dict(x=0, y=100, w=24, h=1)
+        invalid_grids = [None, {}, dict(x=0, y=100, w=24)]
+        for key, value in (
+            ("x", -1), ("y", -1), ("w", -2), ("h", 0),
+            ("x", True), ("y", 1.5), ("w", "6"), ("h", False),
+            ("w", 25), ("x", 1),
+        ):
+            invalid_grids.append(dict(valid, **{key: value}))
+        for nested in (False, True):
+            for grid in invalid_grids:
+                with self.subTest(nested=nested, grid=grid):
+                    dashboard = synthetic_dashboard()
+                    child = dict(id=100, title="Child", type="text", gridPos=grid)
+                    parent = row([child])
+                    if nested:
+                        outer = row([parent])
+                        outer["id"] = 98
+                        parent = outer
+                    dashboard["panels"] = [parent]
+                    with self.assertRaisesRegex(ValueError, "panel 100: gridPos"):
+                        validate_dashboard(dashboard)
+        dashboard = synthetic_dashboard()
+        child = dict(id=100, title="Child", type="text")
+        dashboard["panels"] = [row([child])]
+        with self.assertRaisesRegex(ValueError, "panel 100: gridPos"):
+            validate_dashboard(dashboard)
+
+    def test_saved_nested_child_grids_may_overlap_row_headers(self):
+        dashboard = synthetic_dashboard()
+        child = dict(id=100, title="Child", type="text",
+                     gridPos=dict(x=0, y=100, w=24, h=10))
+        inner = row([child])
+        outer = row([inner])
+        outer["id"] = 98
+        dashboard["panels"] = [outer]
+        validate_dashboard(dashboard)
+
+
 if __name__ == "__main__":
     unittest.main()

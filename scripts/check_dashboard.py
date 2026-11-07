@@ -11,6 +11,7 @@ DEFAULT_PATH = (
     Path(__file__).resolve().parents[1]
     / "deploy/grafana/dashboards/logyard/logyard-home.json"
 )
+MAX_NESTING = 64
 LOKI = {"type": "loki", "uid": "logyard-loki"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
 BUILTINS = {
@@ -61,6 +62,19 @@ def validate_dashboard(dashboard):
         require(variable.get("datasource") == LOKI, f"{name}: expected Loki datasource {LOKI}")
     require({"host", "service", "level"} <= names, "host, service and level variables are required")
 
+    # Bound every container, including extensions, before recursive panel checks.
+    pending = [(dashboard, 1)]
+    while pending:
+        value, depth = pending.pop()
+        if isinstance(value, (dict, list)):
+            require(depth <= MAX_NESTING,
+                    f"dashboard nesting exceeds {MAX_NESTING} container levels")
+            children = value.values() if isinstance(value, dict) else value
+            pending.extend((child, depth + 1) for child in children)
+        elif isinstance(value, str):
+            for name in variable_references(value):
+                require(name in names or name in BUILTINS, f"undefined variable {name}")
+
     panel_ids = set()
 
     def check_panels(panels):
@@ -74,6 +88,13 @@ def validate_dashboard(dashboard):
             for key in ("title", "type"):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
+            grid = panel.get("gridPos")
+            require(isinstance(grid, dict) and all(
+                type(grid.get(key)) is int for key in ("x", "y", "w", "h")
+            ), f"panel {panel['id']}: gridPos needs integer x, y, w, h")
+            x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
+            require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= 24,
+                    f"panel {panel['id']}: gridPos must fit the 24-column grid")
             if panel["type"] not in ("text", "row"):
                 require(panel.get("datasource") == LOKI,
                         f"panel {panel_id}: expected Loki datasource {LOKI}")
@@ -106,30 +127,11 @@ def validate_dashboard(dashboard):
     # not; expanded row children appear in the top-level panels list instead.
     rectangles = []
     for panel in panels:
-        grid = panel.get("gridPos")
-        require(isinstance(grid, dict) and all(
-            type(grid.get(key)) is int for key in ("x", "y", "w", "h")
-        ), f"panel {panel['id']}: gridPos needs integer x, y, w, h")
-        x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
-        require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= 24,
-                f"panel {panel['id']}: gridPos must fit the 24-column grid")
+        x, y, w, h = (panel["gridPos"][key] for key in ("x", "y", "w", "h"))
         for other_id, left, top, right, bottom in rectangles:
             require(not (x < right and left < x + w and y < bottom and top < y + h),
                     f"panels {other_id} and {panel['id']} overlap")
         rectangles.append((panel["id"], x, y, x + w, y + h))
-
-    def check_references(value):
-        if isinstance(value, dict):
-            for child in value.values():
-                check_references(child)
-        elif isinstance(value, list):
-            for child in value:
-                check_references(child)
-        elif isinstance(value, str):
-            for name in variable_references(value):
-                require(name in names or name in BUILTINS, f"undefined variable {name}")
-
-    check_references(dashboard)
 
     dependencies = {
         variable["name"]: variable_references(variable["query"]) & names
@@ -159,7 +161,9 @@ def main():
     path = parser.parse_args().path
     try:
         validate_dashboard(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, UnicodeError, ValueError) as error:
+    except (OSError, UnicodeError, ValueError, RecursionError) as error:
+        if isinstance(error, RecursionError):
+            error = "dashboard nesting or dependency traversal is too deep"
         print(f"Invalid dashboard {path}: {error}", file=sys.stderr)
         return 1
     print(f"Valid dashboard: {path}")
