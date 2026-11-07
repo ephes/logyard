@@ -28,6 +28,13 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def variable_references(query):
+    return {
+        next(group for group in match.groups() if group is not None)
+        for match in VARIABLE.finditer(query)
+    }
+
+
 def validate_dashboard(dashboard):
     """Validate this asset's shape and references, not the Grafana/LogQL schema."""
     require(isinstance(dashboard, dict), "dashboard must be an object")
@@ -95,6 +102,22 @@ def validate_dashboard(dashboard):
     require(isinstance(panels, list) and panels, "dashboard panels must be a nonempty list")
     check_panels(panels)
 
+    # Row headers occupy the visible grid. Collapsed rows' saved children do
+    # not; expanded row children appear in the top-level panels list instead.
+    rectangles = []
+    for panel in panels:
+        grid = panel.get("gridPos")
+        require(isinstance(grid, dict) and all(
+            type(grid.get(key)) is int for key in ("x", "y", "w", "h")
+        ), f"panel {panel['id']}: gridPos needs integer x, y, w, h")
+        x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
+        require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= 24,
+                f"panel {panel['id']}: gridPos must fit the 24-column grid")
+        for other_id, left, top, right, bottom in rectangles:
+            require(not (x < right and left < x + w and y < bottom and top < y + h),
+                    f"panels {other_id} and {panel['id']} overlap")
+        rectangles.append((panel["id"], x, y, x + w, y + h))
+
     def check_references(value):
         if isinstance(value, dict):
             for child in value.values():
@@ -103,11 +126,31 @@ def validate_dashboard(dashboard):
             for child in value:
                 check_references(child)
         elif isinstance(value, str):
-            for match in VARIABLE.finditer(value):
-                name = next(group for group in match.groups() if group is not None)
+            for name in variable_references(value):
                 require(name in names or name in BUILTINS, f"undefined variable {name}")
 
     check_references(dashboard)
+
+    dependencies = {
+        variable["name"]: variable_references(variable["query"]) & names
+        for variable in variables
+    }
+    visiting = []
+    visited = set()
+
+    def visit(name):
+        require(name not in visiting,
+                f"variable dependency cycle: {' -> '.join(visiting + [name])}")
+        if name in visited:
+            return
+        visiting.append(name)
+        for dependency in sorted(dependencies[name]):
+            visit(dependency)
+        visiting.pop()
+        visited.add(name)
+
+    for name in sorted(names):
+        visit(name)
 
 
 def main():
