@@ -2,8 +2,10 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 
@@ -12,6 +14,7 @@ DEFAULT_PATH = (
     / "deploy/grafana/dashboards/logyard/logyard-home.json"
 )
 MAX_NESTING = 64
+MAX_ASSET_BYTES = 1024 * 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
 BUILTINS = {
@@ -36,6 +39,23 @@ def unique_object(pairs):
         require(key not in result, "duplicate JSON object key")
         result[key] = value
     return result
+
+
+def read_asset(path):
+    """Read one regular-file descriptor, bounded even if it grows after fstat."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        info = os.fstat(descriptor)
+        require(stat.S_ISREG(info.st_mode), "dashboard must be a regular file")
+        message = f"dashboard exceeds {MAX_ASSET_BYTES}-byte limit"
+        require(info.st_size <= MAX_ASSET_BYTES, message)
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            content = stream.read(MAX_ASSET_BYTES + 1)
+        require(len(content) <= MAX_ASSET_BYTES, message)
+        return content.decode("utf-8")
+    finally:
+        os.close(descriptor)
 
 
 def variable_references(query):
@@ -169,7 +189,7 @@ def main():
     parser.add_argument("path", nargs="?", type=Path, default=DEFAULT_PATH)
     path = parser.parse_args().path
     try:
-        validate_dashboard(json.loads(path.read_text(encoding="utf-8"),
+        validate_dashboard(json.loads(read_asset(path),
                                       object_pairs_hook=unique_object))
     except (OSError, UnicodeError, ValueError, RecursionError) as error:
         if isinstance(error, RecursionError):

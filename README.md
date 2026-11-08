@@ -70,7 +70,12 @@ python3 -m unittest discover -s tests -v
 ```
 
 The asset check rejects duplicate JSON object keys at every depth, including
-identical values and escaped spellings of the same key.
+identical values and escaped spellings of the same key. Inputs must be UTF-8
+regular files of at most 1 MiB (1,048,576 bytes), inclusive. Symlinks to regular
+files are supported. The checker opens the path once, nonblocking where supported,
+checks the descriptor's type and size before reading, and reads at most the byte
+limit plus one byte to detect growth after the size check. Nonregular files,
+oversized assets and invalid UTF-8 fail with exit 1 and a concise diagnostic.
 It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
