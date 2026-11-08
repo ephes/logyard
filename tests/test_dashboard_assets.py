@@ -280,6 +280,82 @@ def synthetic_dashboard():
     )
 
 
+class DashboardVariableGraphTests(unittest.TestCase):
+    BUILTIN_NAMES = (
+        "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
+        "__auto", "__from", "__to",
+    )
+
+    def test_builtin_names_are_reserved_for_definitions(self):
+        for name in self.BUILTIN_NAMES:
+            with self.subTest(name=name):
+                dashboard = synthetic_dashboard()
+                dashboard["templating"]["list"].append(dict(
+                    name=name, type="query", query="literal",
+                    datasource=dict(type="loki", uid="logyard-loki"),
+                ))
+                with self.assertRaisesRegex(ValueError, f"reserved variable name {name}$"):
+                    validate_dashboard(dashboard)
+
+    def test_all_builtin_references_remain_allowed(self):
+        for template in ("${name}", "${{{name}:regex}}", "[[{name}]]"):
+            with self.subTest(template=template):
+                dashboard = synthetic_dashboard()
+                dashboard["templating"]["list"][0]["query"] = " ".join(
+                    template.format(name=name) for name in self.BUILTIN_NAMES
+                )
+                validate_dashboard(dashboard)
+
+    def chain(self, length=1100):
+        dashboard = synthetic_dashboard()
+        dashboard["templating"]["list"].extend(
+            dict(name=f"v{index:04}", type="query",
+                 query=f"$v{index + 1:04}" if index + 1 < length else "literal",
+                 datasource=dict(type="loki", uid="logyard-loki"))
+            for index in range(length)
+        )
+        return dashboard
+
+    def test_long_acyclic_chain_is_valid_shallow_json(self):
+        dashboard = self.chain()
+        content = json.dumps(dashboard).encode("utf-8")
+        self.assertLess(len(content), 1024 * 1024)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_bytes(content)
+            result = subprocess.run(
+                [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True, timeout=5,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+
+    def test_deep_tail_cycle_retains_stable_diagnostic(self):
+        dashboard = self.chain()
+        dashboard["templating"]["list"][-1]["query"] = "$v1098"
+        expected = "variable dependency cycle: " + " -> ".join(
+            [f"v{index:04}" for index in range(1100)] + ["v1098"]
+        )
+        with self.assertRaises(ValueError) as error:
+            validate_dashboard(dashboard)
+        self.assertEqual(str(error.exception), expected)
+
+    def test_shared_subgraphs_are_not_cycles(self):
+        dashboard = synthetic_dashboard()
+        variables = dashboard["templating"]["list"]
+        for index in range(30):
+            for side in ("a", "b"):
+                variables.append(dict(
+                    name=f"v{index:02}{side}", type="query",
+                    query=f"$v{index + 1:02}a $v{index + 1:02}b" if index < 29 else "literal",
+                    datasource=dict(type="loki", uid="logyard-loki"),
+                ))
+        validate_dashboard(dashboard)
+        variables[-1]["query"] = "$v00a"
+        with self.assertRaisesRegex(ValueError, "variable dependency cycle"):
+            validate_dashboard(dashboard)
+
+
 class DashboardAdmissionTests(unittest.TestCase):
     BYTE_LIMIT = 1024 * 1024
 
