@@ -29,6 +29,15 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def unique_object(pairs):
+    """Reject ambiguous JSON objects before any structural validation."""
+    result = {}
+    for key, value in pairs:
+        require(key not in result, "duplicate JSON object key")
+        result[key] = value
+    return result
+
+
 def variable_references(query):
     return {
         next(group for group in match.groups() if group is not None)
@@ -160,7 +169,8 @@ def main():
     parser.add_argument("path", nargs="?", type=Path, default=DEFAULT_PATH)
     path = parser.parse_args().path
     try:
-        validate_dashboard(json.loads(path.read_text(encoding="utf-8")))
+        validate_dashboard(json.loads(path.read_text(encoding="utf-8"),
+                                      object_pairs_hook=unique_object))
     except (OSError, UnicodeError, ValueError, RecursionError) as error:
         if isinstance(error, RecursionError):
             error = "dashboard nesting or dependency traversal is too deep"

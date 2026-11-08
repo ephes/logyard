@@ -69,7 +69,9 @@ python3 -m scripts.check_dashboard
 python3 -m unittest discover -s tests -v
 ```
 
-The asset check validates JSON, required dashboard/panel/query fields, unique
+The asset check rejects duplicate JSON object keys at every depth, including
+identical values and escaped spellings of the same key.
+It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
 Different panels may reuse a target `refId`. Each query panel must have at least

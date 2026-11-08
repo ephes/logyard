@@ -274,6 +274,55 @@ def synthetic_dashboard():
     )
 
 
+class DashboardAdmissionTests(unittest.TestCase):
+    def run_cli(self, content):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_bytes(content)
+            return subprocess.run(
+                [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True, timeout=5,
+            )
+
+    def assert_invalid(self, result, diagnostic):
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Invalid dashboard", result.stderr)
+        self.assertIn(diagnostic, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_rejects_duplicate_json_keys_at_any_depth(self):
+        dashboard = synthetic_dashboard()
+        panel = dashboard["panels"][0]
+        panel.update(type="logs", datasource=dict(type="loki", uid="logyard-loki"),
+                     targets=[dict(expr="synthetic query", refId="A",
+                                   datasource=dict(type="loki", uid="logyard-loki"))])
+        dashboard["extension"] = {"note": "same"}
+        content = json.dumps(dashboard)
+        for original, replacement in (
+            ('"uid": "logyard-home"', '"uid": "wrong", "uid": "logyard-home"'),
+            ('"uid": "logyard-loki"', '"uid": "wrong", "uid": "logyard-loki"'),
+            ('"x": 0', '"x": -1, "x": 0'),
+            ('"expr": "synthetic query"', '"expr": "", "expr": "synthetic query"'),
+            ('"note": "same"', '"note": "same", "note": "same"'),
+            ('"uid": "logyard-home"', '"\\u0075id": "wrong", "uid": "logyard-home"'),
+        ):
+            with self.subTest(replacement=replacement):
+                mutated = content.replace(original, replacement, 1)
+                self.assertNotEqual(mutated, content)
+                self.assert_invalid(self.run_cli(mutated.encode("utf-8")),
+                                    "duplicate JSON object key")
+
+    def test_cli_accepts_distinct_keys_and_reused_keys_in_separate_objects(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"note": "same", "child": {"note": "other"}}
+        result = self.run_cli(json.dumps(dashboard).encode("utf-8"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertIn("Valid dashboard", result.stdout)
+
+
+
 class DashboardDepthTests(unittest.TestCase):
     def test_extension_container_depth_boundary(self):
         # The root object is depth 1; scalar values do not add container depth.
