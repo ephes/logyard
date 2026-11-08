@@ -1,14 +1,20 @@
 """Synthetic failures for the offline asset check."""
 
 import copy
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
-from scripts.check_dashboard import DEFAULT_PATH, validate_dashboard
+from scripts.check_dashboard import DEFAULT_PATH, main, validate_dashboard
 
 
 def row(children, collapsed=True):
@@ -272,6 +278,139 @@ def synthetic_dashboard():
         panels=[dict(id=1, title="Text", type="text",
                      gridPos=dict(x=0, y=0, w=24, h=1))],
     )
+
+
+class DashboardAdmissionTests(unittest.TestCase):
+    BYTE_LIMIT = 1024 * 1024
+
+    def run_main(self, path):
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(sys, "argv", ["check_dashboard", str(path)]), \
+                redirect_stdout(output), redirect_stderr(errors):
+            code = main()
+        return subprocess.CompletedProcess([], code, output.getvalue(), errors.getvalue())
+
+    def run_cli(self, content):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_bytes(content)
+            return subprocess.run(
+                [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True, timeout=5,
+            )
+
+    def assert_invalid(self, result, diagnostic):
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Invalid dashboard", result.stderr)
+        self.assertIn(diagnostic, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_rejects_duplicate_json_keys_at_any_depth(self):
+        dashboard = synthetic_dashboard()
+        panel = dashboard["panels"][0]
+        panel.update(type="logs", datasource=dict(type="loki", uid="logyard-loki"),
+                     targets=[dict(expr="synthetic query", refId="A",
+                                   datasource=dict(type="loki", uid="logyard-loki"))])
+        dashboard["extension"] = {"note": "same"}
+        content = json.dumps(dashboard)
+        for original, replacement in (
+            ('"uid": "logyard-home"', '"uid": "wrong", "uid": "logyard-home"'),
+            ('"uid": "logyard-loki"', '"uid": "wrong", "uid": "logyard-loki"'),
+            ('"x": 0', '"x": -1, "x": 0'),
+            ('"expr": "synthetic query"', '"expr": "", "expr": "synthetic query"'),
+            ('"note": "same"', '"note": "same", "note": "same"'),
+            ('"uid": "logyard-home"', '"\\u0075id": "wrong", "uid": "logyard-home"'),
+        ):
+            with self.subTest(replacement=replacement):
+                mutated = content.replace(original, replacement, 1)
+                self.assertNotEqual(mutated, content)
+                self.assert_invalid(self.run_cli(mutated.encode("utf-8")),
+                                    "duplicate JSON object key")
+
+    def test_cli_accepts_distinct_keys_and_reused_keys_in_separate_objects(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"note": "same", "child": {"note": "other"}}
+        result = self.run_cli(json.dumps(dashboard).encode("utf-8"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertIn("Valid dashboard", result.stdout)
+
+    def test_cli_byte_limit_includes_exact_boundary(self):
+        content = json.dumps(synthetic_dashboard()).encode("utf-8")
+        exact = content + b" " * (self.BYTE_LIMIT - len(content))
+        result = self.run_cli(exact)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_invalid(self.run_cli(exact + b" "), "byte limit")
+
+    def test_cli_limit_counts_utf8_bytes(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = "\u00e9" * (self.BYTE_LIMIT // 2)
+        content = json.dumps(dashboard, ensure_ascii=False)
+        self.assertLess(len(content), self.BYTE_LIMIT)
+        self.assertGreater(len(content.encode("utf-8")), self.BYTE_LIMIT)
+        self.assert_invalid(self.run_cli(content.encode("utf-8")), "byte limit")
+
+    def test_cli_rejects_invalid_utf8(self):
+        self.assert_invalid(self.run_cli(b"\xff"), "utf-8")
+
+    def test_nonregular_files_are_rejected_before_reading(self):
+        # Synthetic metadata avoids platform-specific devices, FIFOs or sockets.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_text(json.dumps(synthetic_dashboard()), encoding="utf-8")
+            for mode in (stat.S_IFIFO, stat.S_IFCHR, stat.S_IFBLK,
+                         stat.S_IFSOCK, stat.S_IFDIR):
+                with self.subTest(mode=mode), \
+                        patch("os.fstat",
+                              return_value=SimpleNamespace(st_mode=mode, st_size=0)), \
+                        patch("os.fdopen") as reader, \
+                        patch("os.close", wraps=os.close) as close:
+                    self.assert_invalid(self.run_main(path), "regular file")
+                    reader.assert_not_called()
+                    close.assert_called_once()
+
+    def test_open_is_single_and_nonblocking(self):
+        # Inject the flag so this assertion also works on non-POSIX platforms.
+        nonblocking = 1 << 29
+        real_open = os.open
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_text(json.dumps(synthetic_dashboard()), encoding="utf-8")
+            with patch.object(os, "O_NONBLOCK", nonblocking, create=True), \
+                    patch("os.open",
+                          side_effect=lambda path, flags: real_open(path, flags & ~nonblocking)) as opener:
+                result = self.run_main(path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                opener.assert_called_once()
+                self.assertTrue(opener.call_args.args[1] & nonblocking)
+
+    def test_stat_size_refuses_oversized_asset_without_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_text(json.dumps(synthetic_dashboard()), encoding="utf-8")
+            with patch("os.fstat", return_value=SimpleNamespace(
+                    st_mode=stat.S_IFREG, st_size=self.BYTE_LIMIT + 1)), \
+                    patch("os.fdopen") as reader, \
+                    patch("os.close", wraps=os.close) as close:
+                self.assert_invalid(self.run_main(path), "byte limit")
+                reader.assert_not_called()
+                close.assert_called_once()
+
+    def test_actual_read_is_bounded_when_file_grows_after_stat(self):
+        content = json.dumps(synthetic_dashboard()).encode("utf-8")
+        oversized = content + b" " * (self.BYTE_LIMIT + 100 - len(content))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_bytes(content)
+            # The descriptor reports the initial size but now supplies more data.
+            with io.BytesIO(oversized) as stream, \
+                    patch.object(stream, "read", wraps=stream.read) as read, \
+                    patch("os.fdopen", return_value=stream), \
+                    patch("os.close", wraps=os.close) as close:
+                self.assert_invalid(self.run_main(path), "byte limit")
+                read.assert_called_once_with(self.BYTE_LIMIT + 1)
+                close.assert_called_once()
 
 
 class DashboardDepthTests(unittest.TestCase):
