@@ -83,6 +83,7 @@ def validate_dashboard(dashboard):
         name = variable.get("name")
         require(isinstance(name, str) and re.fullmatch(r"[A-Za-z_]\w*", name),
                 "variable needs a valid name")
+        require(name not in BUILTINS, f"reserved variable name {name}")
         require(name not in names, f"duplicate variable {name}")
         names.add(name)
         require(variable.get("type") == "query", f"{name}: expected query variable")
@@ -166,22 +167,27 @@ def validate_dashboard(dashboard):
         variable["name"]: variable_references(variable["query"]) & names
         for variable in variables
     }
-    visiting = []
+    active = set()
     visited = set()
 
-    def visit(name):
-        require(name not in visiting,
-                f"variable dependency cycle: {' -> '.join(visiting + [name])}")
-        if name in visited:
-            return
-        visiting.append(name)
-        for dependency in sorted(dependencies[name]):
-            visit(dependency)
-        visiting.pop()
-        visited.add(name)
-
     for name in sorted(names):
-        visit(name)
+        if name in visited:
+            continue
+        active.add(name)
+        stack = [(name, iter(sorted(dependencies[name])))]
+        while stack:
+            current, children = stack[-1]
+            dependency = next(children, None)
+            if dependency is None:
+                stack.pop()
+                active.remove(current)
+                visited.add(current)
+            elif dependency in active:
+                path = [entry[0] for entry in stack] + [dependency]
+                raise ValueError(f"variable dependency cycle: {' -> '.join(path)}")
+            elif dependency not in visited:
+                active.add(dependency)
+                stack.append((dependency, iter(sorted(dependencies[dependency]))))
 
 
 def main():
@@ -193,7 +199,7 @@ def main():
                                       object_pairs_hook=unique_object))
     except (OSError, UnicodeError, ValueError, RecursionError) as error:
         if isinstance(error, RecursionError):
-            error = "dashboard nesting or dependency traversal is too deep"
+            error = "dashboard nesting is too deep"
         print(f"Invalid dashboard {path}: {error}", file=sys.stderr)
         return 1
     print(f"Valid dashboard: {path}")

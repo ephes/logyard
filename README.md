@@ -92,8 +92,15 @@ Expanded row children live at the top level and are checked there.
 Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
+The supported globals are `__interval`, `__interval_ms`, `__range`, `__range_s`,
+`__range_ms`, `__auto`, `__from` and `__to`. They are reserved for built-in
+references; defining a query variable with one of these names fails with
+`reserved variable name <name>`. Use a different custom variable name.
 References between variable `query` strings must be acyclic, including no self-references;
 formatted references count as dependencies and built-in globals do not.
+Dependency graphs are walked iteratively: long acyclic chains and shared
+dependencies are supported within the asset byte limit, independently of Python's
+recursion limit. Cycle diagnostics show the dependency path in stable name order.
 JSON nesting is limited to 64 container levels, including extension objects and
 saved rows: the dashboard root object is level 1, each nested object or array adds
 one level, and scalar values add none. Excessive nesting during decoding or
