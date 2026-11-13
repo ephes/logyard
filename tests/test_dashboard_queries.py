@@ -215,6 +215,23 @@ class DashboardTargetScopeTests(unittest.TestCase):
         )
         validate_dashboard(dashboard)
 
+    def test_comment_quotes_cannot_hide_an_unscoped_selector(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        target = dashboard["panels"][1]["targets"][0]
+        target["expr"] = (
+            'sum(count_over_time({source_type="journald", host=~"$host", '
+            'service=~"$service", level=~"$level"}[5m])) # "\n'
+            ' or sum(count_over_time({source_type=~".+"}[5m])) # "'
+        )
+        with self.assertRaisesRegex(ValueError, "scope"):
+            validate_dashboard(dashboard)
+
+    def test_commented_out_selectors_are_ignored(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        target = dashboard["panels"][1]["targets"][0]
+        target["expr"] += ' # {host="other"} "unbalanced'
+        validate_dashboard(dashboard)
+
     def test_unparseable_selectors_are_rejected(self):
         for selector in ('source_type="journald" host=~"$host"', 'host=~$host', ''):
             with self.subTest(selector=selector):

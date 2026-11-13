@@ -92,13 +92,17 @@ def skip_string(expr, index):
 
 
 def stream_selectors(expr):
-    """Brace selectors outside strings; ${var} references are not selectors."""
+    """Brace selectors outside strings and # comments; ${var} is not a selector."""
     selectors = []
     index = 0
     while index < len(expr):
         char = expr[index]
         if char in '"`':
             index = skip_string(expr, index)
+        elif char == "#":
+            # LogQL line comment: quotes inside it open no string.
+            end = expr.find("\n", index)
+            index = len(expr) if end == -1 else end + 1
         elif char == "$" and expr.startswith("{", index + 1):
             end = expr.find("}", index + 2)
             require(end != -1, "unterminated variable reference in query")
