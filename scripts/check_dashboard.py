@@ -29,8 +29,8 @@ VARIABLE = re.compile(
     r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)(?::[^{}]+)?\})"
     r"|\[\[([A-Za-z_]\w*)(?::[^\[\]]+)?\]\]"
 )
-# Only inspect brace-delimited selectors, keeping quoted variable formats intact.
-SELECTOR = re.compile(r'\{((?:[^{}"]|"(?:\\.|[^"\\])*")*)\}')
+# One stream matcher: label, operator, and a double-quoted or backtick string.
+MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^`]*`)\s*')
 ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
 
 
@@ -77,30 +77,89 @@ def variable_references(query):
     }
 
 
+def skip_string(expr, index):
+    """Return the index after the double-quoted or backtick string at index."""
+    quote = expr[index]
+    index += 1
+    while index < len(expr):
+        if quote == '"' and expr[index] == "\\":
+            index += 2
+            continue
+        if expr[index] == quote:
+            return index + 1
+        index += 1
+    raise ValueError("unterminated string in query")
+
+
+def stream_selectors(expr):
+    """Brace selectors outside strings; ${var} references are not selectors."""
+    selectors = []
+    index = 0
+    while index < len(expr):
+        char = expr[index]
+        if char in '"`':
+            index = skip_string(expr, index)
+        elif char == "$" and expr.startswith("{", index + 1):
+            end = expr.find("}", index + 2)
+            require(end != -1, "unterminated variable reference in query")
+            index = end + 1
+        elif char == "{":
+            start = index = index + 1
+            while index < len(expr) and expr[index] != "}":
+                if expr[index] in '"`':
+                    index = skip_string(expr, index)
+                else:
+                    index += 1
+            require(index < len(expr), "unterminated selector in query")
+            selectors.append(expr[start:index])
+            index += 1
+        else:
+            index += 1
+    return selectors
+
+
+def selector_matchers(selector, context):
+    """Split one selector into (label, operator, string content) tuples."""
+    matchers = []
+    position = 0
+    while True:
+        match = MATCHER.match(selector, position)
+        require(match, context + ": unparseable selector")
+        label, operator, literal = match.groups()
+        matchers.append((label, operator, literal[1:-1]))
+        position = match.end()
+        if position == len(selector):
+            return matchers
+        require(selector[position] == ",", context + ": unparseable selector")
+        position += 1
+
+
 def check_target_scope(panel, target):
     """Enforce this asset's label policy, without parsing LogQL expressions."""
     context = f"panel {panel['id']}: target {target['refId']}: invalid query scope"
-    selectors = SELECTOR.findall(target["expr"])
+    selectors = stream_selectors(target["expr"])
     require(selectors, context + ": missing selector")
-    required = {"source_type": r'=\s*"journald"'}
+    required = {"source_type": ("=", r"journald")}
     for label in ("host", "service", "level"):
         # The filter contract also supports the documented Grafana reference forms.
-        reference = (rf'(?:\${label}|\$\{{{label}(?::[^{{}}"]+)?\}}'
-                     rf'|\[\[{label}(?::[^\[\]"]+)?\]\])')
-        required[label] = rf'=~\s*"{reference}"'
+        reference = (rf'(?:\${label}|\$\{{{label}(?::[^{{}}"`]+)?\}}'
+                     rf'|\[\[{label}(?::[^\[\]"`]+)?\]\])')
+        required[label] = ("=~", reference)
     if panel["title"] in ERROR_PANELS:
-        required["level"] = r'=~\s*"error\|critical\|alert\|emerg"'
+        required["level"] = ("=~", r"error\|critical\|alert\|emerg")
     elif panel["title"] == "Log Volume by Level":
         del required["level"]
     if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
         require("level" not in variable_references(target["expr"]),
                 context + ": unexpected level variable")
     for selector in selectors:
-        for label, matcher in required.items():
-            require(re.search(rf'(?:^|,)\s*{label}\s*{matcher}\s*(?=,|$)', selector),
+        matchers = selector_matchers(selector, context)
+        for label, (operator, value) in required.items():
+            require(any(name == label and op == operator and re.fullmatch(value, content)
+                        for name, op, content in matchers),
                     context + f": expected {label} filter")
         if panel["title"] == "Log Volume by Level":
-            require(not re.search(r'(?:^|,)\s*level\s*[=!]', selector),
+            require(all(name != "level" for name, _, _ in matchers),
                     context + ": volume must compare all levels")
 
 

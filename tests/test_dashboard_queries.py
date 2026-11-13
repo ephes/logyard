@@ -191,6 +191,39 @@ class DashboardTargetScopeTests(unittest.TestCase):
             panel["targets"].insert(0, helper)
         validate_dashboard(dashboard)
 
+    def test_required_matchers_inside_strings_do_not_count(self):
+        # A required matcher hidden in a backtick or quoted string literal is
+        # not a matcher; this selector actually selects every host.
+        for literal in ('`, host=~"$host", `', '"x, host=~\\"$host\\", y"'):
+            with self.subTest(literal=literal):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                target = dashboard["panels"][1]["targets"][0]
+                target["expr"] = (
+                    'sum(count_over_time({source_type="journald", host=~`.+`, '
+                    f'service=~"$service", level=~"$level", x!={literal}}}[5m]))'
+                )
+                with self.assertRaisesRegex(ValueError, "scope"):
+                    validate_dashboard(dashboard)
+
+    def test_backtick_matchers_and_pipeline_templates_remain_valid(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        target = dashboard["panels"][1]["targets"][0]
+        target["expr"] = (
+            'sum(count_over_time({source_type=`journald`, host=~`$host`, '
+            'service=~"${service:regex}", level=~"$level"} '
+            '| line_format "{{.message}}" | label_format x=`{{.host}}` [5m]))'
+        )
+        validate_dashboard(dashboard)
+
+    def test_unparseable_selectors_are_rejected(self):
+        for selector in ('source_type="journald" host=~"$host"', 'host=~$host', ''):
+            with self.subTest(selector=selector):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                target = dashboard["panels"][1]["targets"][0]
+                target["expr"] = f"sum(count_over_time({{{selector}}}[5m]))"
+                with self.assertRaisesRegex(ValueError, "scope"):
+                    validate_dashboard(dashboard)
+
 
 if __name__ == "__main__":
     unittest.main()

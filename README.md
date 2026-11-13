@@ -96,8 +96,12 @@ contain `source_type="journald"`, `host=~"$host"` and `service=~"$service"`.
 Ordinary panels also require `level=~"$level"`. Only the two named error panels
 use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
 matchers to compare all levels. These exceptions cannot reference `$level`.
-Formatted variable references are supported. This is a focused contract for
-this asset's selectors, not a general LogQL parser or execution check.
+Formatted variable references are supported. Each brace selector outside
+string literals is split into whole `label op "value"` (or backtick) matchers,
+so text inside a quoted or backtick string never counts as a matcher, and
+pipeline templates such as `line_format "{{.message}}"` are not selectors.
+This is a focused contract for this asset's selectors, not a general LogQL
+parser or execution check.
 All panels, including saved children in nested collapsed rows, must have
 positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
