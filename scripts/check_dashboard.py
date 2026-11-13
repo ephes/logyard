@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -15,6 +16,7 @@ DEFAULT_PATH = (
 )
 MAX_NESTING = 64
 MAX_ASSET_BYTES = 1024 * 1024
+MAX_PANELS = 256
 LOKI = {"type": "loki", "uid": "logyard-loki"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
 BUILTINS = {
@@ -39,6 +41,11 @@ def unique_object(pairs):
         require(key not in result, "duplicate JSON object key")
         result[key] = value
     return result
+
+
+def reject_constant(value):
+    """JSON has no NaN or infinity literals, even in unvalidated extensions."""
+    raise ValueError("nonfinite JSON number")
 
 
 def read_asset(path):
@@ -104,6 +111,8 @@ def validate_dashboard(dashboard):
         elif isinstance(value, str):
             for name in variable_references(value):
                 require(name in names or name in BUILTINS, f"undefined variable {name}")
+        elif isinstance(value, float):
+            require(math.isfinite(value), "nonfinite JSON number")
 
     panel_ids = set()
 
@@ -115,6 +124,8 @@ def validate_dashboard(dashboard):
             require(type(panel_id) is int and panel_id > 0 and panel_id not in panel_ids,
                     f"invalid or duplicate panel id {panel_id}")
             panel_ids.add(panel_id)
+            require(len(panel_ids) <= MAX_PANELS,
+                    f"panel count exceeds {MAX_PANELS}")
             for key in ("title", "type"):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
@@ -196,7 +207,8 @@ def main():
     path = parser.parse_args().path
     try:
         validate_dashboard(json.loads(read_asset(path),
-                                      object_pairs_hook=unique_object))
+                                      object_pairs_hook=unique_object,
+                                      parse_constant=reject_constant))
     except (OSError, UnicodeError, ValueError, RecursionError) as error:
         if isinstance(error, RecursionError):
             error = "dashboard nesting is too deep"

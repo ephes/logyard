@@ -70,7 +70,11 @@ python3 -m unittest discover -s tests -v
 ```
 
 The asset check rejects duplicate JSON object keys at every depth, including
-identical values and escaped spellings of the same key. Inputs must be UTF-8
+identical values and escaped spellings of the same key. Inputs must be standard
+JSON: `NaN`, `Infinity`, `-Infinity` and numbers that overflow to infinity
+are rejected, including in extension/annotation options and when calling the
+validator directly. Finite numeric values and strings containing these words
+remain supported. Inputs must be UTF-8
 regular files of at most 1 MiB (1,048,576 bytes), inclusive. Symlinks to regular
 files are supported. The checker opens the path once, nonblocking where supported,
 checks the descriptor's type and size before reading, and reads at most the byte
@@ -89,6 +93,9 @@ Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
 Expanded row children live at the top level and are checked there.
+Dashboards may contain at most 256 panels in total, including all row headers
+and saved children in collapsed/nested rows. This budget is enforced before any
+pairwise overlap checks, bounding those checks to at most 32,640 comparisons.
 Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.

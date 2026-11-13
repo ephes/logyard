@@ -382,6 +382,31 @@ class DashboardAdmissionTests(unittest.TestCase):
         self.assertIn(diagnostic, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_nonfinite_numbers_are_rejected_everywhere(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            for location in ("extension", "annotations"):
+                with self.subTest(value=value, location=location):
+                    dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
+                    dashboard[location] = {"options": [dict(value=value)]}
+                    with self.assertRaisesRegex(ValueError, "nonfinite JSON number"):
+                        validate_dashboard(dashboard)
+                    self.assert_invalid(
+                        self.run_cli(json.dumps(dashboard).encode("utf-8")),
+                        "nonfinite JSON number",
+                    )
+
+    def test_cli_refuses_overflowing_json_number(self):
+        dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
+        content = json.dumps(dashboard)[:-1] + ',"extension":1e999}'
+        self.assert_invalid(self.run_cli(content.encode("utf-8")), "nonfinite JSON number")
+
+    def test_finite_numbers_and_constant_strings_remain_valid(self):
+        dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
+        dashboard["extension"] = [0, -1, 1.25, 1e308, 10**100, "NaN", "Infinity"]
+        validate_dashboard(dashboard)
+        result = self.run_cli(json.dumps(dashboard).encode("utf-8"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_cli_rejects_duplicate_json_keys_at_any_depth(self):
         dashboard = synthetic_dashboard()
         panel = dashboard["panels"][0]
@@ -487,6 +512,53 @@ class DashboardAdmissionTests(unittest.TestCase):
                 self.assert_invalid(self.run_main(path), "byte limit")
                 read.assert_called_once_with(self.BYTE_LIMIT + 1)
                 close.assert_called_once()
+
+
+class DashboardPanelBudgetTests(unittest.TestCase):
+    LIMIT = 256
+
+    def dashboard_with_panels(self, count):
+        dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
+        prototype = dashboard["panels"][0]
+        prototype.pop("options")  # Omit bulky operator notes in the compact fixture.
+        dashboard["panels"] = []
+        for index in range(count):
+            panel = copy.deepcopy(prototype)
+            panel.update(id=index + 1, gridPos=dict(x=0, y=index, w=1, h=1))
+            dashboard["panels"].append(panel)
+        return dashboard
+
+    def test_panel_budget_precedes_any_overlap_comparisons(self):
+        from scripts.check_dashboard import require
+
+        dashboard = self.dashboard_with_panels(2000)
+        self.assertLess(len(json.dumps(dashboard).encode("utf-8")), 1024 * 1024)
+
+        def observe(condition, message):
+            self.assertNotIn(" overlap", message, "overlap work began before admission")
+            require(condition, message)
+
+        with patch("scripts.check_dashboard.require", side_effect=observe):
+            with self.assertRaisesRegex(ValueError, "panel count exceeds 256"):
+                validate_dashboard(dashboard)
+
+    def test_panel_budget_boundary_includes_saved_nested_children(self):
+        for nested in (False, True):
+            for count in (self.LIMIT, self.LIMIT + 1):
+                with self.subTest(nested=nested, count=count):
+                    dashboard = self.dashboard_with_panels(count)
+                    if nested:
+                        children = dashboard["panels"][2:]
+                        inner = row(children)
+                        inner["id"] = 2
+                        outer = row([inner])
+                        outer["id"] = 1
+                        dashboard["panels"] = [outer]
+                    if count == self.LIMIT:
+                        validate_dashboard(dashboard)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "panel count exceeds 256"):
+                            validate_dashboard(dashboard)
 
 
 class DashboardDepthTests(unittest.TestCase):
