@@ -214,7 +214,8 @@ class DashboardAssetTests(unittest.TestCase):
 
     def test_defined_formatted_variables_and_allowed_builtins(self):
         self.dashboard["panels"][1]["targets"][0]["expr"] = (
-            '{host=~"${host:regex}", service=~"[[service:regex]]"}[$__interval]'
+            '{source_type="journald", host=~"${host:regex}", '
+            'service=~"[[service:regex]]", level=~"${level}"}[$__interval]'
         )
         validate_dashboard(self.dashboard)
         self.dashboard["panels"][1]["targets"][0]["expr"] = "$__unknown"

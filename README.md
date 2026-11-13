@@ -87,6 +87,17 @@ Different panels may reuse a target `refId`. Each query panel must have at least
 one visible target: `hide` must be a boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target;
 text and row panels do not need targets. These checks also apply inside rows.
+Every target must explicitly set `queryType` to `instant` or `range`. Stat and
+bar-gauge panels require `instant`; logs and time-series panels require `range`.
+Hidden helper targets follow the same mode contract as visible targets.
+The checker and query regressions inspect every target, including hidden helpers
+and targets saved inside rows, regardless of target order. Every selector must
+contain `source_type="journald"`, `host=~"$host"` and `service=~"$service"`.
+Ordinary panels also require `level=~"$level"`. Only the two named error panels
+use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
+matchers to compare all levels. These exceptions cannot reference `$level`.
+Formatted variable references are supported. This is a focused contract for
+this asset's selectors, not a general LogQL parser or execution check.
 All panels, including saved children in nested collapsed rows, must have
 positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are

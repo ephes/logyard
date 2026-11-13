@@ -18,6 +18,8 @@ MAX_NESTING = 64
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
 LOKI = {"type": "loki", "uid": "logyard-loki"}
+QUERY_MODES = {"stat": "instant", "bargauge": "instant",
+               "logs": "range", "timeseries": "range"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
 BUILTINS = {
     "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
@@ -27,6 +29,9 @@ VARIABLE = re.compile(
     r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)(?::[^{}]+)?\})"
     r"|\[\[([A-Za-z_]\w*)(?::[^\[\]]+)?\]\]"
 )
+# Only inspect brace-delimited selectors, keeping quoted variable formats intact.
+SELECTOR = re.compile(r'\{((?:[^{}"]|"(?:\\.|[^"\\])*")*)\}')
+ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
 
 
 def require(condition, message):
@@ -70,6 +75,33 @@ def variable_references(query):
         next(group for group in match.groups() if group is not None)
         for match in VARIABLE.finditer(query)
     }
+
+
+def check_target_scope(panel, target):
+    """Enforce this asset's label policy, without parsing LogQL expressions."""
+    context = f"panel {panel['id']}: target {target['refId']}: invalid query scope"
+    selectors = SELECTOR.findall(target["expr"])
+    require(selectors, context + ": missing selector")
+    required = {"source_type": r'=\s*"journald"'}
+    for label in ("host", "service", "level"):
+        # The filter contract also supports the documented Grafana reference forms.
+        reference = (rf'(?:\${label}|\$\{{{label}(?::[^{{}}"]+)?\}}'
+                     rf'|\[\[{label}(?::[^\[\]"]+)?\]\])')
+        required[label] = rf'=~\s*"{reference}"'
+    if panel["title"] in ERROR_PANELS:
+        required["level"] = r'=~\s*"error\|critical\|alert\|emerg"'
+    elif panel["title"] == "Log Volume by Level":
+        del required["level"]
+    if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
+        require("level" not in variable_references(target["expr"]),
+                context + ": unexpected level variable")
+    for selector in selectors:
+        for label, matcher in required.items():
+            require(re.search(rf'(?:^|,)\s*{label}\s*{matcher}\s*(?=,|$)', selector),
+                    context + f": expected {label} filter")
+        if panel["title"] == "Log Volume by Level":
+            require(not re.search(r'(?:^|,)\s*level\s*[=!]', selector),
+                    context + ": volume must compare all levels")
 
 
 def validate_dashboard(dashboard):
@@ -155,6 +187,13 @@ def validate_dashboard(dashboard):
                     ref_ids.add(ref_id)
                     require("hide" not in target or type(target["hide"]) is bool,
                             f"panel {panel_id}: target hide must be a boolean")
+                    mode = target.get("queryType")
+                    require(mode in ("instant", "range"),
+                            f"panel {panel_id}: target queryType must be instant or range")
+                    expected_mode = QUERY_MODES.get(panel["type"])
+                    require(expected_mode is None or mode == expected_mode,
+                            f"panel {panel_id}: {panel['type']} target queryType must be {expected_mode}")
+                    check_target_scope(panel, target)
                 require(any(not target.get("hide", False) for target in targets),
                         f"panel {panel_id}: needs at least one visible target")
             if "panels" in panel:
