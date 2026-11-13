@@ -70,7 +70,11 @@ python3 -m unittest discover -s tests -v
 ```
 
 The asset check rejects duplicate JSON object keys at every depth, including
-identical values and escaped spellings of the same key. Inputs must be UTF-8
+identical values and escaped spellings of the same key. Inputs must be standard
+JSON: `NaN`, `Infinity`, `-Infinity` and numbers that overflow to infinity
+are rejected, including in extension/annotation options and when calling the
+validator directly. Finite numeric values and strings containing these words
+remain supported. Inputs must be UTF-8
 regular files of at most 1 MiB (1,048,576 bytes), inclusive. Symlinks to regular
 files are supported. The checker opens the path once, nonblocking where supported,
 checks the descriptor's type and size before reading, and reads at most the byte
@@ -83,12 +87,31 @@ Different panels may reuse a target `refId`. Each query panel must have at least
 one visible target: `hide` must be a boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target;
 text and row panels do not need targets. These checks also apply inside rows.
+Every target must explicitly set `queryType` to `instant` or `range`. Stat and
+bar-gauge panels require `instant`; logs and time-series panels require `range`.
+Hidden helper targets follow the same mode contract as visible targets.
+The checker and query regressions inspect every target, including hidden helpers
+and targets saved inside rows, regardless of target order. Every selector must
+contain `source_type="journald"`, `host=~"$host"` and `service=~"$service"`.
+Ordinary panels also require `level=~"$level"`. Only the two named error panels
+use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
+matchers to compare all levels. These exceptions cannot reference `$level`.
+Formatted variable references are supported. Each brace selector outside
+string literals is split into whole `label op "value"` (or backtick) matchers,
+so text inside a quoted or backtick string never counts as a matcher, and
+pipeline templates such as `line_format "{{.message}}"` are not selectors.
+A `#` line comment ends at its newline; quotes and braces inside it are ignored.
+This is a focused contract for this asset's selectors, not a general LogQL
+parser or execution check.
 All panels, including saved children in nested collapsed rows, must have
 positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
 Expanded row children live at the top level and are checked there.
+Dashboards may contain at most 256 panels in total, including all row headers
+and saved children in collapsed/nested rows. This budget is enforced before any
+pairwise overlap checks, bounding those checks to at most 32,640 comparisons.
 Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.

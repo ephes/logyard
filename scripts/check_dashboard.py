@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -15,7 +16,10 @@ DEFAULT_PATH = (
 )
 MAX_NESTING = 64
 MAX_ASSET_BYTES = 1024 * 1024
+MAX_PANELS = 256
 LOKI = {"type": "loki", "uid": "logyard-loki"}
+QUERY_MODES = {"stat": "instant", "bargauge": "instant",
+               "logs": "range", "timeseries": "range"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
 BUILTINS = {
     "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
@@ -25,6 +29,9 @@ VARIABLE = re.compile(
     r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)(?::[^{}]+)?\})"
     r"|\[\[([A-Za-z_]\w*)(?::[^\[\]]+)?\]\]"
 )
+# One stream matcher: label, operator, and a double-quoted or backtick string.
+MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^`]*`)\s*')
+ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
 
 
 def require(condition, message):
@@ -39,6 +46,11 @@ def unique_object(pairs):
         require(key not in result, "duplicate JSON object key")
         result[key] = value
     return result
+
+
+def reject_constant(value):
+    """JSON has no NaN or infinity literals, even in unvalidated extensions."""
+    raise ValueError("nonfinite JSON number")
 
 
 def read_asset(path):
@@ -63,6 +75,96 @@ def variable_references(query):
         next(group for group in match.groups() if group is not None)
         for match in VARIABLE.finditer(query)
     }
+
+
+def skip_string(expr, index):
+    """Return the index after the double-quoted or backtick string at index."""
+    quote = expr[index]
+    index += 1
+    while index < len(expr):
+        if quote == '"' and expr[index] == "\\":
+            index += 2
+            continue
+        if expr[index] == quote:
+            return index + 1
+        index += 1
+    raise ValueError("unterminated string in query")
+
+
+def stream_selectors(expr):
+    """Brace selectors outside strings and # comments; ${var} is not a selector."""
+    selectors = []
+    index = 0
+    while index < len(expr):
+        char = expr[index]
+        if char in '"`':
+            index = skip_string(expr, index)
+        elif char == "#":
+            # LogQL line comment: quotes inside it open no string.
+            end = expr.find("\n", index)
+            index = len(expr) if end == -1 else end + 1
+        elif char == "$" and expr.startswith("{", index + 1):
+            end = expr.find("}", index + 2)
+            require(end != -1, "unterminated variable reference in query")
+            index = end + 1
+        elif char == "{":
+            start = index = index + 1
+            while index < len(expr) and expr[index] != "}":
+                if expr[index] in '"`':
+                    index = skip_string(expr, index)
+                else:
+                    index += 1
+            require(index < len(expr), "unterminated selector in query")
+            selectors.append(expr[start:index])
+            index += 1
+        else:
+            index += 1
+    return selectors
+
+
+def selector_matchers(selector, context):
+    """Split one selector into (label, operator, string content) tuples."""
+    matchers = []
+    position = 0
+    while True:
+        match = MATCHER.match(selector, position)
+        require(match, context + ": unparseable selector")
+        label, operator, literal = match.groups()
+        matchers.append((label, operator, literal[1:-1]))
+        position = match.end()
+        if position == len(selector):
+            return matchers
+        require(selector[position] == ",", context + ": unparseable selector")
+        position += 1
+
+
+def check_target_scope(panel, target):
+    """Enforce this asset's label policy, without parsing LogQL expressions."""
+    context = f"panel {panel['id']}: target {target['refId']}: invalid query scope"
+    selectors = stream_selectors(target["expr"])
+    require(selectors, context + ": missing selector")
+    required = {"source_type": ("=", r"journald")}
+    for label in ("host", "service", "level"):
+        # The filter contract also supports the documented Grafana reference forms.
+        reference = (rf'(?:\${label}|\$\{{{label}(?::[^{{}}"`]+)?\}}'
+                     rf'|\[\[{label}(?::[^\[\]"`]+)?\]\])')
+        required[label] = ("=~", reference)
+    if panel["title"] in ERROR_PANELS:
+        required["level"] = ("=~", r"error\|critical\|alert\|emerg")
+    elif panel["title"] == "Log Volume by Level":
+        del required["level"]
+    if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
+        require("level" not in variable_references(target["expr"]),
+                context + ": unexpected level variable")
+    for selector in selectors:
+        matchers = selector_matchers(selector, context)
+        for label, (operator, value) in required.items():
+            require(any(name == label and op == operator and re.fullmatch(value, content)
+                        for name, op, content in matchers),
+                    context + f": expected {label} filter")
+        if panel["title"] == "Log Volume by Level":
+            require(all(name != "level" for name, _, _ in matchers),
+                    context + ": volume must compare all levels")
 
 
 def validate_dashboard(dashboard):
@@ -104,6 +206,8 @@ def validate_dashboard(dashboard):
         elif isinstance(value, str):
             for name in variable_references(value):
                 require(name in names or name in BUILTINS, f"undefined variable {name}")
+        elif isinstance(value, float):
+            require(math.isfinite(value), "nonfinite JSON number")
 
     panel_ids = set()
 
@@ -115,6 +219,8 @@ def validate_dashboard(dashboard):
             require(type(panel_id) is int and panel_id > 0 and panel_id not in panel_ids,
                     f"invalid or duplicate panel id {panel_id}")
             panel_ids.add(panel_id)
+            require(len(panel_ids) <= MAX_PANELS,
+                    f"panel count exceeds {MAX_PANELS}")
             for key in ("title", "type"):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
@@ -144,6 +250,13 @@ def validate_dashboard(dashboard):
                     ref_ids.add(ref_id)
                     require("hide" not in target or type(target["hide"]) is bool,
                             f"panel {panel_id}: target hide must be a boolean")
+                    mode = target.get("queryType")
+                    require(mode in ("instant", "range"),
+                            f"panel {panel_id}: target queryType must be instant or range")
+                    expected_mode = QUERY_MODES.get(panel["type"])
+                    require(expected_mode is None or mode == expected_mode,
+                            f"panel {panel_id}: {panel['type']} target queryType must be {expected_mode}")
+                    check_target_scope(panel, target)
                 require(any(not target.get("hide", False) for target in targets),
                         f"panel {panel_id}: needs at least one visible target")
             if "panels" in panel:
@@ -196,7 +309,8 @@ def main():
     path = parser.parse_args().path
     try:
         validate_dashboard(json.loads(read_asset(path),
-                                      object_pairs_hook=unique_object))
+                                      object_pairs_hook=unique_object,
+                                      parse_constant=reject_constant))
     except (OSError, UnicodeError, ValueError, RecursionError) as error:
         if isinstance(error, RecursionError):
             error = "dashboard nesting is too deep"
