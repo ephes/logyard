@@ -125,6 +125,50 @@ class DashboardQueryTests(unittest.TestCase):
 
 
 class DashboardTargetScopeTests(unittest.TestCase):
+    def test_selector_variable_formatters_are_allowlisted(self):
+        source = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        for index, panel in enumerate(source["panels"]):
+            for target_index, target in enumerate(panel.get("targets", [])):
+                for name in ("host", "service", "level"):
+                    if f"${name}" not in target["expr"]:
+                        continue
+                    for template in ("${{{name}:{formatter}}}", "[[{name}:{formatter}]]"):
+                        for formatter in ("raw", "text", "csv", "glob", "json", "unknown", "regex:raw"):
+                            reference = template.format(name=name, formatter=formatter)
+                            with self.subTest(panel=panel["title"], reference=reference):
+                                dashboard = copy.deepcopy(source)
+                                dashboard["panels"][index]["targets"][target_index]["expr"] = (
+                                    target["expr"].replace(f"${name}", reference)
+                                )
+                                with self.assertRaisesRegex(ValueError, "scope"):
+                                    validate_dashboard(dashboard)
+
+    def test_safe_reference_forms_accept_literal_selected_values(self):
+        # Values stay in variable metadata; the checker must not interpret their
+        # quotes or regex punctuation as query syntax or interpolate them itself.
+        for template in ("${name}", "${{{name}}}", "${{{name}:regex}}",
+                         "[[{name}]]", "[[{name}:regex]]"):
+            with self.subTest(template=template):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                for variable in dashboard["templating"]["list"]:
+                    value = 'synthetic."quoted"[value](a|b)+\\tail'
+                    variable["current"] = dict(text=value, value=value)
+                for _, target in query_targets(dashboard["panels"]):
+                    for name in ("host", "service", "level"):
+                        target["expr"] = target["expr"].replace(
+                            f"${name}", template.format(name=name),
+                        )
+                validate_dashboard(dashboard)
+
+    def test_extra_matcher_cannot_use_an_unsafe_formatter(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        target = dashboard["panels"][1]["targets"][0]
+        target["expr"] = target["expr"].replace(
+            'level=~"$level"', 'level=~"$level", extra=~"${host:raw}"',
+        )
+        with self.assertRaisesRegex(ValueError, "scope"):
+            validate_dashboard(dashboard)
+
     def test_added_unscoped_target_is_rejected_in_any_position_or_visibility(self):
         for hidden in (False, True):
             for reverse in (False, True):

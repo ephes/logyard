@@ -130,12 +130,23 @@ def selector_matchers(selector, context):
         match = MATCHER.match(selector, position)
         require(match, context + ": unparseable selector")
         label, operator, literal = match.groups()
-        matchers.append((label, operator, literal[1:-1]))
+        content = literal[1:-1]
+        for reference in VARIABLE.finditer(content):
+            name = next(group for group in reference.groups() if group is not None)
+            if name in ("host", "service", "level"):
+                require(re.fullmatch(selector_reference(name), reference.group()),
+                        context + f": unsupported {name} selector formatter")
+        matchers.append((label, operator, content))
         position = match.end()
         if position == len(selector):
             return matchers
         require(selector[position] == ",", context + ": unparseable selector")
         position += 1
+
+
+def selector_reference(name):
+    """Only default Loki interpolation and explicit regex formatting are allowed."""
+    return rf'(?:\${name}|\$\{{{name}(?::regex)?\}}|\[\[{name}(?::regex)?\]\])'
 
 
 def check_target_scope(panel, target):
@@ -145,10 +156,7 @@ def check_target_scope(panel, target):
     require(selectors, context + ": missing selector")
     required = {"source_type": ("=", r"journald")}
     for label in ("host", "service", "level"):
-        # The filter contract also supports the documented Grafana reference forms.
-        reference = (rf'(?:\${label}|\$\{{{label}(?::[^{{}}"`]+)?\}}'
-                     rf'|\[\[{label}(?::[^\[\]"`]+)?\]\])')
-        required[label] = ("=~", reference)
+        required[label] = ("=~", selector_reference(label))
     if panel["title"] in ERROR_PANELS:
         required["level"] = ("=~", r"error\|critical\|alert\|emerg")
     elif panel["title"] == "Log Volume by Level":
