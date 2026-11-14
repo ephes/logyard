@@ -188,7 +188,9 @@ def check_variable_query_scope(variable):
     if name not in ("host", "service", "level"):
         return
     context = f"variable {name}: invalid query scope"
-    query = without_query_comments(variable["query"])
+    # Raw text, as Grafana's migrateVariableQuery matches it: a LogQL comment in
+    # or after the wrapper makes Grafana fall back to a label-names query.
+    query = variable["query"]
     prefix = re.match(r'\s*label_values\s*\(\s*', query)
     require(prefix, context + ": expected label_values(selector, label)")
     selectors = stream_selectors(query)
@@ -220,7 +222,9 @@ def check_target_scope(panel, target):
     elif panel["title"] == "Log Volume by Level":
         del required["level"]
     if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
-        require("level" not in variable_references(target["expr"], logql=True),
+        # Grafana interpolates $level in comments too; a value with a newline
+        # would end the comment, so comment references count here.
+        require("level" not in variable_references(target["expr"]),
                 context + ": unexpected level variable")
     for selector in selectors:
         matchers = selector_matchers(selector, context)
@@ -372,7 +376,8 @@ def validate_dashboard(dashboard):
         rectangles.append((panel["id"], x, y, x + w, y + h))
 
     dependencies = {
-        variable["name"]: variable_references(variable["query"], logql=True) & names
+        # Grafana finds dependencies in the whole query text, comments included.
+        variable["name"]: variable_references(variable["query"]) & names
         for variable in variables
     }
     active = set()

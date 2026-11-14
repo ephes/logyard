@@ -157,10 +157,15 @@ references; defining a query variable with one of these names fails with
 `reserved variable name <name>`. Use a different custom variable name.
 References between variable `query` strings must be acyclic, including no self-references;
 formatted references count as dependencies and built-in globals do not.
-In target `expr` and variable `query` fields, references inside `#` line comments
-are ignored, including for dependencies and the fixed-level panel exceptions.
-References inside double-quoted or backtick strings still count, even after a
-literal `#`. Titles, descriptions, variable metadata and other strings keep
+In target `expr` and variable `query` fields, an unknown reference that appears only
+inside a `#` line comment is not reported as undefined. Comments do not hide
+references otherwise: Grafana interpolates and resolves dependencies over the whole
+query text, so references in comments still count for the dependency graph and the
+fixed-level panel exceptions (a value with a newline would end the comment). The
+`label_values(selector, label)` wrapper of the host, service and level variables is
+checked on the raw query: a comment inside or after it fails, because Grafana would
+then fall back to a label-names query. References inside double-quoted or backtick
+strings always count, even after a literal `#`. Titles, descriptions, variable metadata and other strings keep
 ordinary reference checking; they do not use LogQL comment rules.
 Dependency graphs are walked iteratively: long acyclic chains and shared
 dependencies are supported within the asset byte limit, independently of Python's

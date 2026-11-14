@@ -245,16 +245,52 @@ class DashboardAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "undefined variable"):
             validate_dashboard(self.dashboard)
 
-    def test_query_comments_do_not_define_references_or_dependencies(self):
-        for reference in ("$missing", "${host}", "[[service:regex]]", "$level"):
+    def test_unknown_references_only_in_panel_comments_are_not_undefined(self):
+        for reference in ("$missing", "${missing:regex}", "[[missing]]"):
             with self.subTest(reference=reference):
                 dashboard = copy.deepcopy(self.dashboard)
-                for variable in dashboard["templating"]["list"]:
-                    variable["query"] += f' # {reference} "unbalanced'
                 for panel in dashboard["panels"]:
                     for target in panel.get("targets", []):
                         target["expr"] += f' # {reference} "unbalanced'
                 validate_dashboard(dashboard)
+
+    def test_comment_references_still_count_where_grafana_interpolates(self):
+        # Grafana interpolates $level inside comments as well; a value with a
+        # newline would end the comment, so fixed-level panels refuse it there too.
+        errors = next(index for index, panel in enumerate(self.dashboard["panels"])
+                      if panel.get("title") == "Errors (15m)")
+        dashboard = copy.deepcopy(self.dashboard)
+        dashboard["panels"][errors]["targets"][0]["expr"] += " # $level"
+        with self.assertRaisesRegex(ValueError, "unexpected level variable"):
+            validate_dashboard(dashboard)
+
+    def test_variable_query_comments_break_the_label_values_wrapper(self):
+        # Grafana matches label_values(...) on the raw text and otherwise falls
+        # back to a label-names query, so no comment may follow or split it.
+        variables = self.dashboard["templating"]["list"]
+        host = next(index for index, variable in enumerate(variables)
+                    if variable["name"] == "host")
+        query = variables[host]["query"]
+        selector_end = query.index("}") + 1
+        for changed in (query + " # note",
+                        query[:selector_end] + " # c\n" + query[selector_end:],
+                        query[:-1] + " # c\n)"):
+            with self.subTest(query=changed):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][host]["query"] = changed
+                with self.assertRaisesRegex(ValueError, "invalid query scope"):
+                    validate_dashboard(dashboard)
+
+    def test_references_inside_variable_query_comments_are_dependencies(self):
+        # Grafana resolves dependencies over the whole text: level already
+        # depends on host, so a commented $level in host is a cycle.
+        variables = self.dashboard["templating"]["list"]
+        host = next(index for index, variable in enumerate(variables)
+                    if variable["name"] == "host")
+        variables[host]["query"] += " # $level"
+        with self.assertRaisesRegex(ValueError,
+                                    "variable dependency cycle: host -> level -> host"):
+            validate_dashboard(self.dashboard)
 
     def test_active_references_after_comments_and_inside_strings_still_count(self):
         for suffix in (' # ignored\n | line_format "$missing"',
