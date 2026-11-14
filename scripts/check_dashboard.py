@@ -70,7 +70,27 @@ def read_asset(path):
         os.close(descriptor)
 
 
-def variable_references(query):
+def without_query_comments(query):
+    """Remove LogQL # comments while preserving quoted interpolation and newlines."""
+    parts = []
+    index = 0
+    while index < len(query):
+        start = index
+        if query[index] in '"`':
+            index = skip_string(query, index)
+        elif query[index] == "#":
+            end = query.find("\n", index)
+            index = len(query) if end == -1 else end
+            continue
+        else:
+            index += 1
+        parts.append(query[start:index])
+    return "".join(parts)
+
+
+def variable_references(query, *, logql=False):
+    if logql:
+        query = without_query_comments(query)
     return {
         next(group for group in match.groups() if group is not None)
         for match in VARIABLE.finditer(query)
@@ -175,7 +195,7 @@ def check_variable_query_scope(variable):
     if name not in ("host", "service", "level"):
         return
     context = f"variable {name}: invalid query scope"
-    query = variable["query"]
+    query = without_query_comments(variable["query"])
     prefix = re.match(r'\s*label_values\s*\(\s*', query)
     require(prefix, context + ": expected label_values(selector, label)")
     selectors = stream_selectors(query)
@@ -207,7 +227,7 @@ def check_target_scope(panel, target):
     elif panel["title"] == "Log Volume by Level":
         del required["level"]
     if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
-        require("level" not in variable_references(target["expr"]),
+        require("level" not in variable_references(target["expr"], logql=True),
                 context + ": unexpected level variable")
     for selector in selectors:
         matchers = selector_matchers(selector, context)
@@ -245,19 +265,28 @@ def validate_dashboard(dashboard):
     require({"host", "service", "level"} <= names, "host, service and level variables are required")
 
     # Bound every container, including extensions, before recursive panel checks.
-    pending = [(dashboard, 1)]
+    strings = []
+    pending = [(dashboard, 1, None, None)]
     while pending:
-        value, depth = pending.pop()
+        value, depth, owner, key = pending.pop()
         if isinstance(value, (dict, list)):
             require(depth <= MAX_NESTING,
                     f"dashboard nesting exceeds {MAX_NESTING} container levels")
-            children = value.values() if isinstance(value, dict) else value
-            pending.extend((child, depth + 1) for child in children)
+            children = value.items() if isinstance(value, dict) else enumerate(value)
+            pending.extend((child, depth + 1, id(value), key) for key, child in children)
         elif isinstance(value, str):
-            for name in variable_references(value):
-                require(name in names or name in BUILTINS, f"undefined variable {name}")
+            strings.append((value, owner, key))
         elif isinstance(value, float):
             require(math.isfinite(value), "nonfinite JSON number")
+
+    query_fields = {(id(variable), "query") for variable in variables}
+
+    def check_references(value, *, logql=False):
+        for name in variable_references(value, logql=logql):
+            require(name in names or name in BUILTINS, f"undefined variable {name}")
+
+    for variable in variables:
+        check_references(variable["query"], logql=True)
 
     panel_ids = set()
 
@@ -274,6 +303,15 @@ def validate_dashboard(dashboard):
             for key in ("title", "type"):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
+            if panel["type"] == "row":
+                require(type(panel.get("collapsed")) is bool,
+                        f"panel {panel_id}: row collapsed must be a boolean")
+            if "panels" in panel:
+                require(panel["type"] == "row",
+                        f"panel {panel_id}: only rows may store children")
+                require(isinstance(panel["panels"], list), "panels must be a list")
+                require(panel["collapsed"] or not panel["panels"],
+                        f"panel {panel_id}: expanded row children must be top-level")
             grid = panel.get("gridPos")
             require(isinstance(grid, dict) and all(
                 type(grid.get(key)) is int for key in ("x", "y", "w", "h")
@@ -294,6 +332,8 @@ def validate_dashboard(dashboard):
                     for key in ("expr", "refId"):
                         require(isinstance(target.get(key), str) and target[key].strip(),
                                 f"panel {panel_id}: missing target {key}")
+                    query_fields.add((id(target), "expr"))
+                    check_references(target["expr"], logql=True)
                     ref_id = target["refId"]
                     require(ref_id not in ref_ids,
                             f"panel {panel_id}: duplicate target refId {ref_id}")
@@ -315,6 +355,9 @@ def validate_dashboard(dashboard):
     panels = dashboard.get("panels")
     require(isinstance(panels, list) and panels, "dashboard panels must be a nonempty list")
     check_panels(panels)
+    for value, owner, key in strings:
+        if (owner, key) not in query_fields:
+            check_references(value)
 
     # Row headers occupy the visible grid. Collapsed rows' saved children do
     # not; expanded row children appear in the top-level panels list instead.
@@ -327,7 +370,7 @@ def validate_dashboard(dashboard):
         rectangles.append((panel["id"], x, y, x + w, y + h))
 
     dependencies = {
-        variable["name"]: variable_references(variable["query"]) & names
+        variable["name"]: variable_references(variable["query"], logql=True) & names
         for variable in variables
     }
     active = set()

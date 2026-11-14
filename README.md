@@ -129,7 +129,9 @@ positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
-Expanded row children live at the top level and are checked there.
+Every row must have a boolean `collapsed` flag. Only rows may have a `panels`
+list; an expanded row may have an empty list, but its children live at the top
+level and are checked there. Leaf panels cannot store children.
 Dashboards may contain at most 256 panels in total, including all row headers
 and saved children in collapsed/nested rows. This budget is enforced before any
 pairwise overlap checks, bounding those checks to at most 32,640 comparisons.
@@ -142,6 +144,11 @@ references; defining a query variable with one of these names fails with
 `reserved variable name <name>`. Use a different custom variable name.
 References between variable `query` strings must be acyclic, including no self-references;
 formatted references count as dependencies and built-in globals do not.
+In target `expr` and variable `query` fields, references inside `#` line comments
+are ignored, including for dependencies and the fixed-level panel exceptions.
+References inside double-quoted or backtick strings still count, even after a
+literal `#`. Titles, descriptions, variable metadata and other strings keep
+ordinary reference checking; they do not use LogQL comment rules.
 Dependency graphs are walked iteratively: long acyclic chains and shared
 dependencies are supported within the asset byte limit, independently of Python's
 recursion limit. Cycle diagnostics show the dependency path in stable name order.

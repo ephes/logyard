@@ -53,6 +53,29 @@ class DashboardAssetTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "panel id"):
                     validate_dashboard(dashboard)
 
+    def test_only_collapsed_rows_can_store_children(self):
+        for kind, collapsed, children in (
+            ("text", True, True), ("text", True, False),
+            ("row", False, True), ("row", None, True),
+            ("row", 1, True), ("row", "true", True),
+        ):
+            with self.subTest(kind=kind, collapsed=collapsed, children=children):
+                dashboard = copy.deepcopy(self.dashboard)
+                child = copy.deepcopy(dashboard["panels"][1])
+                parent = row([child] if children else [], collapsed=collapsed)
+                parent["type"] = kind
+                dashboard["panels"] = [parent]
+                with self.assertRaisesRegex(ValueError, "children|collapsed"):
+                    validate_dashboard(dashboard)
+        for collapsed in (None, 0, "false"):
+            dashboard = copy.deepcopy(self.dashboard)
+            parent = row([], collapsed=collapsed)
+            parent.pop("panels")
+            dashboard["panels"] = [parent]
+            with self.subTest(collapsed=collapsed):
+                with self.assertRaisesRegex(ValueError, "collapsed"):
+                    validate_dashboard(dashboard)
+
     def test_expanded_row_with_top_level_children(self):
         self.dashboard["panels"] = [
             row([], collapsed=False),
@@ -220,6 +243,43 @@ class DashboardAssetTests(unittest.TestCase):
         validate_dashboard(self.dashboard)
         self.dashboard["panels"][1]["targets"][0]["expr"] = "$__unknown"
         with self.assertRaisesRegex(ValueError, "undefined variable"):
+            validate_dashboard(self.dashboard)
+
+    def test_query_comments_do_not_define_references_or_dependencies(self):
+        for reference in ("$missing", "${host}", "[[service:regex]]", "$level"):
+            with self.subTest(reference=reference):
+                dashboard = copy.deepcopy(self.dashboard)
+                for variable in dashboard["templating"]["list"]:
+                    variable["query"] += f' # {reference} "unbalanced'
+                for panel in dashboard["panels"]:
+                    for target in panel.get("targets", []):
+                        target["expr"] += f' # {reference} "unbalanced'
+                validate_dashboard(dashboard)
+
+    def test_active_references_after_comments_and_inside_strings_still_count(self):
+        for suffix in (' # ignored\n | line_format "$missing"',
+                       ' | line_format "# $missing"',
+                       ' | line_format `# $missing`',
+                       r' | line_format "escaped \" # $missing"'):
+            with self.subTest(suffix=suffix):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["panels"][1]["targets"][0]["expr"] += suffix
+                with self.assertRaisesRegex(ValueError, "undefined variable missing"):
+                    validate_dashboard(dashboard)
+        dashboard = copy.deepcopy(self.dashboard)
+        dashboard["templating"]["list"][0]["query"] += ' # ignored\n $service'
+        with self.assertRaisesRegex(ValueError, "variable dependency cycle"):
+            validate_dashboard(dashboard)
+
+    def test_metadata_keeps_references_after_hash(self):
+        for key in ("title", "description", "query"):
+            with self.subTest(key=key):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["extension"] = {key: "# $missing"}
+                with self.assertRaisesRegex(ValueError, "undefined variable missing"):
+                    validate_dashboard(dashboard)
+        self.dashboard["title"] += " # $missing"
+        with self.assertRaisesRegex(ValueError, "undefined variable missing"):
             validate_dashboard(self.dashboard)
 
     def test_variable_names_are_unique_and_required(self):
