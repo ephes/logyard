@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import unittest
 
-from scripts.check_dashboard import validate_dashboard
+from scripts.check_dashboard import selector_matchers, stream_selectors, validate_dashboard
 
 
 DASHBOARD = (
@@ -122,6 +122,87 @@ class DashboardQueryTests(unittest.TestCase):
                     self.assertEqual(len(selected), expected_lines)
                     expected_groups = 2 if host == ".*" else 1
                     self.assertEqual(len({stream[group] for stream in selected}), expected_groups)
+
+
+class DashboardVariableQueryTests(unittest.TestCase):
+    def setUp(self):
+        self.dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+
+    def test_dropdowns_require_journald_and_each_parent_filter(self):
+        for index, original in enumerate(self.dashboard["templating"]["list"]):
+            body = stream_selectors(original["query"])[0]
+            for matcher in body.split(", "):
+                with self.subTest(variable=original["name"], missing=matcher):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    variable = dashboard["templating"]["list"][index]
+                    remaining = ", ".join(part for part in body.split(", ") if part != matcher)
+                    variable["query"] = original["query"].replace(body, remaining)
+                    with self.assertRaisesRegex(ValueError, "variable .*query scope"):
+                        validate_dashboard(dashboard)
+
+    def test_dropdown_query_must_return_its_own_label_from_one_selector(self):
+        for index, original in enumerate(self.dashboard["templating"]["list"]):
+            name = original["name"]
+            for query in (
+                f"label_values({name})",
+                original["query"].replace(f", {name})", ", environment)"),
+                original["query"] + ' or label_values({source_type="other"}, service)',
+                'query_result({source_type="journald"})',
+                'label_values("{source_type=\\"journald\\"}", ' + name + ')',
+            ):
+                with self.subTest(variable=name, query=query):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    dashboard["templating"]["list"][index]["query"] = query
+                    with self.assertRaisesRegex(ValueError, "variable .*query scope"):
+                        validate_dashboard(dashboard)
+
+    def test_dropdown_parent_matchers_cannot_be_spoofed_or_use_raw(self):
+        original = self.dashboard["templating"]["list"][1]["query"]
+        for replacement in ('host=~".*"', 'host="$host"', 'other=~"$host"',
+                            'extra=`host=~"$host"`', 'host=~"${host:raw}"',
+                            'host=~"[[host:text]]"', 'host=~"prefix-$host"'):
+            with self.subTest(replacement=replacement):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][1]["query"] = original.replace(
+                    'host=~"$host"', replacement,
+                )
+                with self.assertRaisesRegex(ValueError, "variable service:.*query scope"):
+                    validate_dashboard(dashboard)
+
+    def test_dropdowns_allow_safe_formats_backticks_and_whitespace(self):
+        for template in ("${name}", "${{{name}}}", "${{{name}:regex}}",
+                         "[[{name}]]", "[[{name}:regex]]"):
+            with self.subTest(template=template):
+                dashboard = copy.deepcopy(self.dashboard)
+                for variable in dashboard["templating"]["list"]:
+                    query = variable["query"].replace('"', '`')
+                    for name in ("host", "service"):
+                        query = query.replace(f"${name}", template.format(name=name))
+                    variable["query"] = " \n" + query.replace("label_values(", "label_values( \n ") + " \n"
+                validate_dashboard(dashboard)
+
+    def test_dropdown_choices_on_synthetic_streams_follow_parents(self):
+        streams = [
+            dict(host="host-a", service="shared", level="info", source_type="journald"),
+            dict(host="host-a", service="a-only", level="error", source_type="journald"),
+            dict(host="host-b", service="b-only", level="debug", source_type="journald"),
+            dict(host="host-c", service="other-source", level="trace", source_type="other"),
+        ]
+        selected_values = dict(host="host-a", service="a-only")
+        expected = dict(host={"host-a", "host-b"}, service={"shared", "a-only"}, level={"error"})
+        validate_dashboard(self.dashboard)
+        for variable in self.dashboard["templating"]["list"]:
+            with self.subTest(variable=variable["name"]):
+                matchers = selector_matchers(stream_selectors(variable["query"])[0], "test")
+                selected = streams
+                for label, operator, value in matchers:
+                    value = (re.escape(selected_values[value[1:]])
+                             if value.startswith("$") else value)
+                    selected = [stream for stream in selected
+                                if (re.fullmatch(value, stream[label]) is not None
+                                    if operator == "=~" else stream[label] == value)]
+                self.assertEqual({stream[variable["name"]] for stream in selected},
+                                 expected[variable["name"]])
 
 
 class DashboardTargetScopeTests(unittest.TestCase):

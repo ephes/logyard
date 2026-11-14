@@ -244,9 +244,9 @@ class DashboardAssetTests(unittest.TestCase):
 
     def test_acyclic_formatted_dependencies_and_globals_are_allowed(self):
         variables = self.dashboard["templating"]["list"]
-        variables[0]["query"] = "label_values({time=\"$__from\"}, host)"
-        variables[1]["query"] = 'label_values({host=~"${host:regex}"}, service)'
-        variables[2]["query"] = 'label_values({service=~"[[service:regex]]"}, level)'
+        variables[0]["query"] = 'label_values({source_type="journald", time="$__from"}, host)'
+        variables[1]["query"] = variables[1]["query"].replace("$host", "${host:regex}")
+        variables[2]["query"] = variables[2]["query"].replace("$service", "[[service:regex]]")
         # Declaration order does not determine the dependency order.
         self.dashboard["templating"]["list"].reverse()
         validate_dashboard(self.dashboard)
@@ -269,12 +269,17 @@ class DashboardAssetTests(unittest.TestCase):
 
 
 def synthetic_dashboard():
+    scopes = dict(
+        host='source_type="journald"',
+        service='source_type="journald", host=~"$host"',
+        level='source_type="journald", host=~"$host", service=~"$service"',
+    )
     return dict(
         uid="logyard-home", title="Synthetic", schemaVersion=1,
         templating=dict(list=[
-            dict(name=name, type="query", query=f"label_values({name})",
+            dict(name=name, type="query", query=f"label_values({{{scope}}}, {name})",
                  datasource=dict(type="loki", uid="logyard-loki"))
-            for name in ("host", "service", "level")
+            for name, scope in scopes.items()
         ]),
         panels=[dict(id=1, title="Text", type="text",
                      gridPos=dict(x=0, y=0, w=24, h=1))],
@@ -302,9 +307,11 @@ class DashboardVariableGraphTests(unittest.TestCase):
         for template in ("${name}", "${{{name}:regex}}", "[[{name}]]"):
             with self.subTest(template=template):
                 dashboard = synthetic_dashboard()
-                dashboard["templating"]["list"][0]["query"] = " ".join(
-                    template.format(name=name) for name in self.BUILTIN_NAMES
-                )
+                dashboard["templating"]["list"].append(dict(
+                    name="globals", type="query",
+                    query=" ".join(template.format(name=name) for name in self.BUILTIN_NAMES),
+                    datasource=dict(type="loki", uid="logyard-loki"),
+                ))
                 validate_dashboard(dashboard)
 
     def chain(self, length=1100):

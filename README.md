@@ -110,6 +110,17 @@ pipeline templates such as `line_format "{{.message}}"` are not selectors.
 A `#` line comment ends at its newline; quotes and braces inside it are ignored.
 This is a focused contract for this asset's selectors, not a general LogQL
 parser or execution check.
+The three filter dropdown queries must each be a single
+`label_values({selector}, label)` call returning their own label. All require
+`source_type="journald"`; `service` additionally requires `host=~"$host"`,
+and `level` requires both `host=~"$host"` and `service=~"$service"`.
+The same safe interpolation forms and whole-matcher checks apply here, so
+unscoped `label_values(service)`, wrong returned labels and parent filters
+hidden inside strings are rejected before provisioning. This keeps service
+choices within the selected host and level choices within the selected
+host/service. All selections retain their existing regex behavior. Extra
+query variables still follow the datasource, reference and dependency checks;
+the dropdown scope policy is specific to these three filters.
 All panels, including saved children in nested collapsed rows, must have
 positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are

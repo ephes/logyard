@@ -149,6 +149,38 @@ def selector_reference(name):
     return rf'(?:\${name}|\$\{{{name}(?::regex)?\}}|\[\[{name}(?::regex)?\]\])'
 
 
+def require_scope_matchers(matchers, required, context):
+    for label, (operator, value) in required.items():
+        require(any(name == label and op == operator and re.fullmatch(value, content)
+                    for name, op, content in matchers),
+                context + f": expected {label} filter")
+
+
+def check_variable_query_scope(variable):
+    """Check this dashboard's label_values wrapper and parent selectors only."""
+    name = variable["name"]
+    if name not in ("host", "service", "level"):
+        return
+    context = f"variable {name}: invalid query scope"
+    query = variable["query"]
+    prefix = re.match(r'\s*label_values\s*\(\s*', query)
+    require(prefix, context + ": expected label_values(selector, label)")
+    selectors = stream_selectors(query)
+    require(len(selectors) == 1, context + ": expected one selector")
+    selector = "{" + selectors[0] + "}"
+    require(query.startswith(selector, prefix.end()),
+            context + ": expected selector argument")
+    suffix = query[prefix.end() + len(selector):]
+    require(re.fullmatch(rf'\s*,\s*{name}\s*\)\s*', suffix),
+            context + f": expected returned label {name}")
+    required = {"source_type": ("=", r"journald")}
+    if name in ("service", "level"):
+        required["host"] = ("=~", selector_reference("host"))
+    if name == "level":
+        required["service"] = ("=~", selector_reference("service"))
+    require_scope_matchers(selector_matchers(selectors[0], context), required, context)
+
+
 def check_target_scope(panel, target):
     """Enforce this asset's label policy, without parsing LogQL expressions."""
     context = f"panel {panel['id']}: target {target['refId']}: invalid query scope"
@@ -166,10 +198,7 @@ def check_target_scope(panel, target):
                 context + ": unexpected level variable")
     for selector in selectors:
         matchers = selector_matchers(selector, context)
-        for label, (operator, value) in required.items():
-            require(any(name == label and op == operator and re.fullmatch(value, content)
-                        for name, op, content in matchers),
-                    context + f": expected {label} filter")
+        require_scope_matchers(matchers, required, context)
         if panel["title"] == "Log Volume by Level":
             require(all(name != "level" for name, _, _ in matchers),
                     context + ": volume must compare all levels")
@@ -309,6 +338,9 @@ def validate_dashboard(dashboard):
             elif dependency not in visited:
                 active.add(dependency)
                 stack.append((dependency, iter(sorted(dependencies[dependency]))))
+
+    for variable in variables:
+        check_variable_query_scope(variable)
 
 
 def main():
