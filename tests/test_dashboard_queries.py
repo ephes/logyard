@@ -128,6 +128,44 @@ class DashboardVariableQueryTests(unittest.TestCase):
     def setUp(self):
         self.dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
 
+    def test_scoped_custom_all_values_are_allowlisted(self):
+        for index in range(3):
+            for value in ('"} or {source_type="other', ".+", "$host", " .*", 0, False, [], {}):
+                with self.subTest(index=index, value=value):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    dashboard["templating"]["list"][index]["allValue"] = value
+                    with self.assertRaisesRegex(ValueError, "allValue"):
+                        validate_dashboard(dashboard)
+            for value in (None, "", ".*"):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][index]["allValue"] = value
+                validate_dashboard(dashboard)
+            dashboard = copy.deepcopy(self.dashboard)
+            del dashboard["templating"]["list"][index]["allValue"]
+            validate_dashboard(dashboard)
+
+    def test_scoped_boolean_options_must_enable_literal_escaping(self):
+        for index in range(3):
+            for key in ("includeAll", "multi"):
+                for value in (None, 0, 1, "false", [], {}):
+                    with self.subTest(index=index, key=key, value=value):
+                        dashboard = copy.deepcopy(self.dashboard)
+                        dashboard["templating"]["list"][index][key] = value
+                        with self.assertRaisesRegex(ValueError, key + " must be a boolean"):
+                            validate_dashboard(dashboard)
+            for multi, include_all in ((True, False), (False, True), (True, True)):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][index].update(multi=multi, includeAll=include_all)
+                validate_dashboard(dashboard)
+            dashboard = copy.deepcopy(self.dashboard)
+            dashboard["templating"]["list"][index].update(multi=False, includeAll=False)
+            with self.assertRaisesRegex(ValueError, "enable multi or includeAll"):
+                validate_dashboard(dashboard)
+            for key in ("multi", "includeAll"):
+                del dashboard["templating"]["list"][index][key]
+            with self.assertRaisesRegex(ValueError, "enable multi or includeAll"):
+                validate_dashboard(dashboard)
+
     def test_dropdowns_require_journald_and_each_parent_filter(self):
         for index, original in enumerate(self.dashboard["templating"]["list"]):
             body = stream_selectors(original["query"])[0]

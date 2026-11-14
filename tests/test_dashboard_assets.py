@@ -337,7 +337,7 @@ def synthetic_dashboard():
     return dict(
         uid="logyard-home", title="Synthetic", schemaVersion=1,
         templating=dict(list=[
-            dict(name=name, type="query", query=f"label_values({{{scope}}}, {name})",
+            dict(name=name, type="query", includeAll=True, query=f"label_values({{{scope}}}, {name})",
                  datasource=dict(type="loki", uid="logyard-loki"))
             for name, scope in scopes.items()
         ]),

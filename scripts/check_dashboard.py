@@ -262,6 +262,15 @@ def validate_dashboard(dashboard):
         require(isinstance(variable.get("query"), str) and variable["query"].strip(),
                 f"{name}: missing query")
         require(variable.get("datasource") == LOKI, f"{name}: expected Loki datasource {LOKI}")
+        if name in ("host", "service", "level"):
+            for option in ("includeAll", "multi"):
+                require(option not in variable or type(variable[option]) is bool,
+                        f"{name}: {option} must be a boolean")
+            require(variable.get("includeAll", False) or variable.get("multi", False),
+                    f"{name}: enable multi or includeAll for literal regex escaping")
+            all_value = variable.get("allValue")
+            require(all_value is None or (isinstance(all_value, str) and all_value in ("", ".*")),
+                    f"{name}: allValue must be empty or exactly .*")
     require({"host", "service", "level"} <= names, "host, service and level variables are required")
 
     # Bound every container, including extensions, before recursive panel checks.

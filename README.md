@@ -121,7 +121,15 @@ The same safe interpolation forms and whole-matcher checks apply here, so
 unscoped `label_values(service)`, wrong returned labels and parent filters
 hidden inside strings are rejected before provisioning. This keeps service
 choices within the selected host and level choices within the selected
-host/service. All selections retain their existing regex behavior. Extra
+host/service. For `host`, `service` and `level`, `includeAll` and `multi` must be booleans
+when present (omission means false), and at least one must be true: Grafana's
+Loki datasource otherwise bypasses literal regex escaping. `allValue` may be
+omitted, null or empty for Grafana's default expansion, or exactly `.*` to select
+all values. Other custom All expressions are rejected even when All is disabled.
+[Grafana does not escape custom All values](https://grafana.com/docs/grafana/latest/visualizations/dashboards/variables/add-template-variables/#custom-all-value),
+so they must never contain matcher syntax or interpolated references. Ordinary
+single and multiple selections use literal regex escaping; custom All `.*`
+intentionally selects every value within the other filters. Extra
 query variables still follow the datasource, reference and dependency checks;
 the dropdown scope policy is specific to these three filters.
 All panels, including saved children in nested collapsed rows, must have
