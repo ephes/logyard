@@ -97,15 +97,20 @@ Ordinary panels also require `level=~"$level"`. Only the two named error panels
 use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
 matchers to compare all levels. These exceptions cannot reference `$level`.
 Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
-`[[name]]` only inside double-quoted strings, and the explicit `${name:regex}` /
-`[[name:regex]]` forms only inside backtick raw strings. Default Loki
-interpolation escapes regex backslashes a second time for a double-quoted LogQL
-string, while `:regex` writes single backslashes and leaves quotes alone, so each
-form keeps producer label values (for example dotted systemd units) intact only
-with its matching quoting. `:raw`, `:text` and all other formatters are
-rejected, including in additional matchers alongside the required filters. Selected values may
-contain quotes and regex punctuation; they remain Grafana variable data, not
-literal query fragments to paste into the dashboard JSON.
+`[[name]]` only inside double-quoted strings. All explicit formatters, including
+`:regex`, `:raw` and `:text`, are rejected, including in additional matchers
+alongside the required filters. Backtick strings remain supported for static
+values and pipeline templates, but cannot interpolate these filters: `:regex`
+does not escape a literal backtick in producer label data.
+Default Loki interpolation escapes regex backslashes a second time for a
+double-quoted LogQL string, preserving backticks, backslashes and regex
+punctuation as literal data. **Known upstream limitation:** the pinned Grafana
+v13.0.0 formatter does not escape double quotes. Label values containing `"`
+can break the query; the checker does not promise safe execution for them.
+The offline [interpolation oracle](tests/fixtures/README.md) records this failure
+alongside successful literal selections using the real Loki v3.6.0 parser.
+Supporting quotes needs a separately agreed formatter policy; the provisioned
+asset and producer label policy are unchanged by this checker fix.
 Each brace selector outside
 string literals is split into whole `label op "value"` (or backtick) matchers,
 so text inside a quoted or backtick string never counts as a matcher, and
@@ -121,7 +126,15 @@ The same safe interpolation forms and whole-matcher checks apply here, so
 unscoped `label_values(service)`, wrong returned labels and parent filters
 hidden inside strings are rejected before provisioning. This keeps service
 choices within the selected host and level choices within the selected
-host/service. All selections retain their existing regex behavior. Extra
+host/service. For `host`, `service` and `level`, `includeAll` and `multi` must be booleans
+when present (omission means false), and at least one must be true: Grafana's
+Loki datasource otherwise bypasses literal regex escaping. `allValue` may be
+omitted, null or empty for Grafana's default expansion, or exactly `.*` to select
+all values. Other custom All expressions are rejected even when All is disabled.
+[Grafana does not escape custom All values](https://grafana.com/docs/grafana/latest/visualizations/dashboards/variables/add-template-variables/#custom-all-value),
+so they must never contain matcher syntax or interpolated references. Ordinary
+single and multiple selections use literal regex escaping; custom All `.*`
+intentionally selects every value within the other filters. Extra
 query variables still follow the datasource, reference and dependency checks;
 the dropdown scope policy is specific to these three filters.
 All panels, including saved children in nested collapsed rows, must have
@@ -129,7 +142,9 @@ positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
-Expanded row children live at the top level and are checked there.
+Every row must have a boolean `collapsed` flag. Only rows may have a `panels`
+list; an expanded row may have an empty list, but its children live at the top
+level and are checked there. Leaf panels cannot store children.
 Dashboards may contain at most 256 panels in total, including all row headers
 and saved children in collapsed/nested rows. This budget is enforced before any
 pairwise overlap checks, bounding those checks to at most 32,640 comparisons.
@@ -142,6 +157,16 @@ references; defining a query variable with one of these names fails with
 `reserved variable name <name>`. Use a different custom variable name.
 References between variable `query` strings must be acyclic, including no self-references;
 formatted references count as dependencies and built-in globals do not.
+In target `expr` and variable `query` fields, an unknown reference that appears only
+inside a `#` line comment is not reported as undefined. Comments do not hide
+references otherwise: Grafana interpolates and resolves dependencies over the whole
+query text, so references in comments still count for the dependency graph and the
+fixed-level panel exceptions (a value with a newline would end the comment). The
+`label_values(selector, label)` wrapper of the host, service and level variables is
+checked on the raw query: a comment inside or after it fails, because Grafana would
+then fall back to a label-names query. References inside double-quoted or backtick
+strings always count, even after a literal `#`. Titles, descriptions, variable metadata and other strings keep
+ordinary reference checking; they do not use LogQL comment rules.
 Dependency graphs are walked iteratively: long acyclic chains and shared
 dependencies are supported within the asset byte limit, independently of Python's
 recursion limit. Cycle diagnostics show the dependency path in stable name order.

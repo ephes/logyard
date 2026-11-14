@@ -53,6 +53,29 @@ class DashboardAssetTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "panel id"):
                     validate_dashboard(dashboard)
 
+    def test_only_collapsed_rows_can_store_children(self):
+        for kind, collapsed, children in (
+            ("text", True, True), ("text", True, False),
+            ("row", False, True), ("row", None, True),
+            ("row", 1, True), ("row", "true", True),
+        ):
+            with self.subTest(kind=kind, collapsed=collapsed, children=children):
+                dashboard = copy.deepcopy(self.dashboard)
+                child = copy.deepcopy(dashboard["panels"][1])
+                parent = row([child] if children else [], collapsed=collapsed)
+                parent["type"] = kind
+                dashboard["panels"] = [parent]
+                with self.assertRaisesRegex(ValueError, "children|collapsed"):
+                    validate_dashboard(dashboard)
+        for collapsed in (None, 0, "false"):
+            dashboard = copy.deepcopy(self.dashboard)
+            parent = row([], collapsed=collapsed)
+            parent.pop("panels")
+            dashboard["panels"] = [parent]
+            with self.subTest(collapsed=collapsed):
+                with self.assertRaisesRegex(ValueError, "collapsed"):
+                    validate_dashboard(dashboard)
+
     def test_expanded_row_with_top_level_children(self):
         self.dashboard["panels"] = [
             row([], collapsed=False),
@@ -214,12 +237,85 @@ class DashboardAssetTests(unittest.TestCase):
 
     def test_defined_formatted_variables_and_allowed_builtins(self):
         self.dashboard["panels"][1]["targets"][0]["expr"] = (
-            '{source_type="journald", host=~`${host:regex}`, '
-            'service=~`[[service:regex]]`, level=~"${level}"}[$__interval]'
+            '{source_type="journald", host=~"${host}", '
+            'service=~"[[service]]", level=~"${level}"}[$__interval]'
         )
         validate_dashboard(self.dashboard)
         self.dashboard["panels"][1]["targets"][0]["expr"] = "$__unknown"
         with self.assertRaisesRegex(ValueError, "undefined variable"):
+            validate_dashboard(self.dashboard)
+
+    def test_unknown_references_only_in_panel_comments_are_not_undefined(self):
+        for reference in ("$missing", "${missing:regex}", "[[missing]]"):
+            with self.subTest(reference=reference):
+                dashboard = copy.deepcopy(self.dashboard)
+                for panel in dashboard["panels"]:
+                    for target in panel.get("targets", []):
+                        target["expr"] += f' # {reference} "unbalanced'
+                validate_dashboard(dashboard)
+
+    def test_comment_references_still_count_where_grafana_interpolates(self):
+        # Grafana interpolates $level inside comments as well; a value with a
+        # newline would end the comment, so fixed-level panels refuse it there too.
+        errors = next(index for index, panel in enumerate(self.dashboard["panels"])
+                      if panel.get("title") == "Errors (15m)")
+        dashboard = copy.deepcopy(self.dashboard)
+        dashboard["panels"][errors]["targets"][0]["expr"] += " # $level"
+        with self.assertRaisesRegex(ValueError, "unexpected level variable"):
+            validate_dashboard(dashboard)
+
+    def test_variable_query_comments_break_the_label_values_wrapper(self):
+        # Grafana matches label_values(...) on the raw text and otherwise falls
+        # back to a label-names query, so no comment may follow or split it.
+        variables = self.dashboard["templating"]["list"]
+        host = next(index for index, variable in enumerate(variables)
+                    if variable["name"] == "host")
+        query = variables[host]["query"]
+        selector_end = query.index("}") + 1
+        for changed in (query + " # note",
+                        query[:selector_end] + " # c\n" + query[selector_end:],
+                        query[:-1] + " # c\n)"):
+            with self.subTest(query=changed):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][host]["query"] = changed
+                with self.assertRaisesRegex(ValueError, "invalid query scope"):
+                    validate_dashboard(dashboard)
+
+    def test_references_inside_variable_query_comments_are_dependencies(self):
+        # Grafana resolves dependencies over the whole text: level already
+        # depends on host, so a commented $level in host is a cycle.
+        variables = self.dashboard["templating"]["list"]
+        host = next(index for index, variable in enumerate(variables)
+                    if variable["name"] == "host")
+        variables[host]["query"] += " # $level"
+        with self.assertRaisesRegex(ValueError,
+                                    "variable dependency cycle: host -> level -> host"):
+            validate_dashboard(self.dashboard)
+
+    def test_active_references_after_comments_and_inside_strings_still_count(self):
+        for suffix in (' # ignored\n | line_format "$missing"',
+                       ' | line_format "# $missing"',
+                       ' | line_format `# $missing`',
+                       r' | line_format "escaped \" # $missing"'):
+            with self.subTest(suffix=suffix):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["panels"][1]["targets"][0]["expr"] += suffix
+                with self.assertRaisesRegex(ValueError, "undefined variable missing"):
+                    validate_dashboard(dashboard)
+        dashboard = copy.deepcopy(self.dashboard)
+        dashboard["templating"]["list"][0]["query"] += ' # ignored\n $service'
+        with self.assertRaisesRegex(ValueError, "variable dependency cycle"):
+            validate_dashboard(dashboard)
+
+    def test_metadata_keeps_references_after_hash(self):
+        for key in ("title", "description", "query"):
+            with self.subTest(key=key):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["extension"] = {key: "# $missing"}
+                with self.assertRaisesRegex(ValueError, "undefined variable missing"):
+                    validate_dashboard(dashboard)
+        self.dashboard["title"] += " # $missing"
+        with self.assertRaisesRegex(ValueError, "undefined variable missing"):
             validate_dashboard(self.dashboard)
 
     def test_variable_names_are_unique_and_required(self):
@@ -245,8 +341,8 @@ class DashboardAssetTests(unittest.TestCase):
     def test_acyclic_formatted_dependencies_and_globals_are_allowed(self):
         variables = self.dashboard["templating"]["list"]
         variables[0]["query"] = 'label_values({source_type="journald", time="$__from"}, host)'
-        variables[1]["query"] = variables[1]["query"].replace('"$host"', "`${host:regex}`")
-        variables[2]["query"] = variables[2]["query"].replace('"$service"', "`[[service:regex]]`")
+        variables[1]["query"] = variables[1]["query"].replace('"$host"', '"${host}"')
+        variables[2]["query"] = variables[2]["query"].replace('"$service"', '"[[service]]"')
         # Declaration order does not determine the dependency order.
         self.dashboard["templating"]["list"].reverse()
         validate_dashboard(self.dashboard)
@@ -277,7 +373,7 @@ def synthetic_dashboard():
     return dict(
         uid="logyard-home", title="Synthetic", schemaVersion=1,
         templating=dict(list=[
-            dict(name=name, type="query", query=f"label_values({{{scope}}}, {name})",
+            dict(name=name, type="query", includeAll=True, query=f"label_values({{{scope}}}, {name})",
                  datasource=dict(type="loki", uid="logyard-loki"))
             for name, scope in scopes.items()
         ]),

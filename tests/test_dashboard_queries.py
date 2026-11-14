@@ -128,6 +128,44 @@ class DashboardVariableQueryTests(unittest.TestCase):
     def setUp(self):
         self.dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
 
+    def test_scoped_custom_all_values_are_allowlisted(self):
+        for index in range(3):
+            for value in ('"} or {source_type="other', ".+", "$host", " .*", 0, False, [], {}):
+                with self.subTest(index=index, value=value):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    dashboard["templating"]["list"][index]["allValue"] = value
+                    with self.assertRaisesRegex(ValueError, "allValue"):
+                        validate_dashboard(dashboard)
+            for value in (None, "", ".*"):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][index]["allValue"] = value
+                validate_dashboard(dashboard)
+            dashboard = copy.deepcopy(self.dashboard)
+            del dashboard["templating"]["list"][index]["allValue"]
+            validate_dashboard(dashboard)
+
+    def test_scoped_boolean_options_must_enable_literal_escaping(self):
+        for index in range(3):
+            for key in ("includeAll", "multi"):
+                for value in (None, 0, 1, "false", [], {}):
+                    with self.subTest(index=index, key=key, value=value):
+                        dashboard = copy.deepcopy(self.dashboard)
+                        dashboard["templating"]["list"][index][key] = value
+                        with self.assertRaisesRegex(ValueError, key + " must be a boolean"):
+                            validate_dashboard(dashboard)
+            for multi, include_all in ((True, False), (False, True), (True, True)):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][index].update(multi=multi, includeAll=include_all)
+                validate_dashboard(dashboard)
+            dashboard = copy.deepcopy(self.dashboard)
+            dashboard["templating"]["list"][index].update(multi=False, includeAll=False)
+            with self.assertRaisesRegex(ValueError, "enable multi or includeAll"):
+                validate_dashboard(dashboard)
+            for key in ("multi", "includeAll"):
+                del dashboard["templating"]["list"][index][key]
+            with self.assertRaisesRegex(ValueError, "enable multi or includeAll"):
+                validate_dashboard(dashboard)
+
     def test_dropdowns_require_journald_and_each_parent_filter(self):
         for index, original in enumerate(self.dashboard["templating"]["list"]):
             body = stream_selectors(original["query"])[0]
@@ -173,10 +211,8 @@ class DashboardVariableQueryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "variable service:.*query scope"):
                     validate_dashboard(dashboard)
 
-    def test_dropdowns_allow_safe_formats_backticks_and_whitespace(self):
-        # Default interpolation belongs in "..." and :regex in backtick strings.
-        for template, quote in (("${name}", '"'), ("${{{name}}}", '"'), ("[[{name}]]", '"'),
-                                ("${{{name}:regex}}", '`'), ("[[{name}:regex]]", '`')):
+    def test_dropdowns_allow_default_formats_and_whitespace(self):
+        for template, quote in (("${name}", '"'), ("${{{name}}}", '"'), ("[[{name}]]", '"')):
             with self.subTest(template=template):
                 dashboard = copy.deepcopy(self.dashboard)
                 for variable in dashboard["templating"]["list"]:
@@ -210,6 +246,57 @@ class DashboardVariableQueryTests(unittest.TestCase):
                                  expected[variable["name"]])
 
 
+class DashboardInterpolationOracleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).parent / "fixtures/loki-interpolation.json"
+        cls.cases = json.loads(path.read_text(encoding="utf-8"))["cases"]
+
+    def test_default_literal_choices_agree_with_real_loki_matchers(self):
+        positive_names = {"backtick", "backslash", "regex", "multi", "custom-all", "default-all"}
+        positive = [case for case in self.cases if not case["raw"] and case["name"] in positive_names]
+        self.assertEqual({case["name"] for case in positive}, positive_names)
+        for case in positive:
+            with self.subTest(case=case["name"]):
+                self.assertTrue(case["parse_ok"])
+                # Decode only the captured selector's string literals; the real
+                # LogQL parse and RE2 matches were captured independently in Go.
+                matchers = selector_matchers(stream_selectors(case["expr"])[0], "oracle")
+                decoded = [(label, op, json.loads('"' + value + '"'))
+                           for label, op, value in matchers]
+                self.assertEqual({label: value for label, _, value in decoded}, case["patterns"])
+                matches = [index for index, stream in enumerate(case["streams"])
+                           if all((re.fullmatch(value, stream[label]) is not None
+                                   if op == "=~" else value == stream[label])
+                                  for label, op, value in decoded)]
+                self.assertEqual(matches, case["matches"])
+                expected = list(range(len(case["values"])))
+                if case["name"] == "custom-all":
+                    expected.append(len(case["values"]))
+                self.assertEqual(matches, expected)
+
+    def test_raw_templates_are_refused_even_when_some_labels_happen_to_work(self):
+        for case in self.cases:
+            if not case["raw"]:
+                continue
+            with self.subTest(case=case["name"]):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                dashboard["panels"][1]["targets"][0]["expr"] = case["template"]
+                with self.assertRaisesRegex(ValueError, "unsupported service selector formatter"):
+                    validate_dashboard(dashboard)
+        backtick = next(c for c in self.cases if c["name"] == "backtick" and c["raw"])
+        self.assertFalse(backtick["parse_ok"], "Grafana :regex cannot escape raw delimiters")
+
+    def test_upstream_default_quote_failure_is_recorded(self):
+        # This explicitly preserves the known gap instead of faking a passing
+        # interpolation round trip. See fixtures/README.md and the owner question.
+        for name in ("quote", "selector"):
+            case = next(c for c in self.cases if c["name"] == name and not c["raw"])
+            with self.subTest(case=name):
+                self.assertFalse(case["parse_ok"])
+                self.assertNotIn("matches", case)
+
+
 class DashboardTargetScopeTests(unittest.TestCase):
     def test_selector_variable_formatters_are_allowlisted(self):
         source = json.loads(DASHBOARD.read_text(encoding="utf-8"))
@@ -229,11 +316,33 @@ class DashboardTargetScopeTests(unittest.TestCase):
                                 with self.assertRaisesRegex(ValueError, "scope"):
                                     validate_dashboard(dashboard)
 
-    def test_safe_reference_forms_accept_literal_selected_values(self):
+    def test_raw_string_scoped_variables_are_rejected_everywhere(self):
+        for name in ("host", "service", "level"):
+            for reference in (f"${{{name}:regex}}", f"[[{name}:regex]]"):
+                for extra in (False, True):
+                    with self.subTest(name=name, reference=reference, extra=extra):
+                        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                        target = dashboard["panels"][1]["targets"][0]
+                        if extra:
+                            target["expr"] = target["expr"].replace(
+                                'source_type="journald"',
+                                f'source_type="journald", extra=~`{reference}`',
+                            )
+                        else:
+                            target["expr"] = target["expr"].replace(f'"${name}"', f'`{reference}`')
+                        with self.assertRaisesRegex(ValueError, "unsupported .* selector formatter"):
+                            validate_dashboard(dashboard)
+        for index, name in ((1, "host"), (2, "service")):
+            dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+            variable = dashboard["templating"]["list"][index]
+            variable["query"] = variable["query"].replace(f'"${name}"', f'`${{{name}:regex}}`')
+            with self.assertRaisesRegex(ValueError, "unsupported .* selector formatter"):
+                validate_dashboard(dashboard)
+
+    def test_reference_validation_does_not_interpret_selected_value_metadata(self):
         # Values stay in variable metadata; the checker must not interpret their
         # quotes or regex punctuation as query syntax or interpolate them itself.
-        for template, quote in (("${name}", '"'), ("${{{name}}}", '"'), ("[[{name}]]", '"'),
-                                ("${{{name}:regex}}", '`'), ("[[{name}:regex]]", '`')):
+        for template, quote in (("${name}", '"'), ("${{{name}}}", '"'), ("[[{name}]]", '"')):
             with self.subTest(template=template):
                 dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
                 for variable in dashboard["templating"]["list"]:
@@ -248,7 +357,7 @@ class DashboardTargetScopeTests(unittest.TestCase):
 
     def test_formatter_must_match_the_string_quoting(self):
         # Default interpolation double-escapes for "..." strings; :regex writes
-        # single backslashes for backtick raw strings. Mixing them breaks values.
+        # single backslashes and cannot preserve raw-string delimiters.
         for replacement in ("`$host`", "`${host}`", "`[[host]]`",
                             '"${host:regex}"', '"[[host:regex]]"'):
             with self.subTest(replacement=replacement):
@@ -351,7 +460,7 @@ class DashboardTargetScopeTests(unittest.TestCase):
         dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
         target = dashboard["panels"][1]["targets"][0]
         target["expr"] = (
-            'sum(count_over_time({source_type=`journald`, host=~`${host:regex}`, '
+            'sum(count_over_time({source_type=`journald`, host=~"$host", '
             'service=~"$service", level=~"$level"} '
             '| line_format "{{.message}}" | label_format x=`{{.host}}` [5m]))'
         )
