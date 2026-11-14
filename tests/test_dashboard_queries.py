@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import unittest
 
-from scripts.check_dashboard import validate_dashboard
+from scripts.check_dashboard import selector_matchers, stream_selectors, validate_dashboard
 
 
 DASHBOARD = (
@@ -124,7 +124,149 @@ class DashboardQueryTests(unittest.TestCase):
                     self.assertEqual(len({stream[group] for stream in selected}), expected_groups)
 
 
+class DashboardVariableQueryTests(unittest.TestCase):
+    def setUp(self):
+        self.dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+
+    def test_dropdowns_require_journald_and_each_parent_filter(self):
+        for index, original in enumerate(self.dashboard["templating"]["list"]):
+            body = stream_selectors(original["query"])[0]
+            for matcher in body.split(", "):
+                with self.subTest(variable=original["name"], missing=matcher):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    variable = dashboard["templating"]["list"][index]
+                    # Replace rather than delete, so a selector never becomes empty
+                    # and the exact missing-filter diagnostic is asserted.
+                    remaining = ", ".join('unrelated="synthetic"' if part == matcher else part
+                                          for part in body.split(", "))
+                    variable["query"] = original["query"].replace(body, remaining)
+                    label = matcher.split("=")[0]
+                    with self.assertRaisesRegex(ValueError, f"variable .*query scope: expected {label} filter"):
+                        validate_dashboard(dashboard)
+
+    def test_dropdown_query_must_return_its_own_label_from_one_selector(self):
+        for index, original in enumerate(self.dashboard["templating"]["list"]):
+            name = original["name"]
+            for query in (
+                f"label_values({name})",
+                original["query"].replace(f", {name})", ", environment)"),
+                original["query"] + ' or label_values({source_type="other"}, service)',
+                'query_result({source_type="journald"})',
+                'label_values("{source_type=\\"journald\\"}", ' + name + ')',
+            ):
+                with self.subTest(variable=name, query=query):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    dashboard["templating"]["list"][index]["query"] = query
+                    with self.assertRaisesRegex(ValueError, "variable .*query scope"):
+                        validate_dashboard(dashboard)
+
+    def test_dropdown_parent_matchers_cannot_be_spoofed_or_use_raw(self):
+        original = self.dashboard["templating"]["list"][1]["query"]
+        for replacement in ('host=~".*"', 'host="$host"', 'other=~"$host"',
+                            'extra=`host=~"$host"`', 'host=~"${host:raw}"',
+                            'host=~"[[host:text]]"', 'host=~"prefix-$host"'):
+            with self.subTest(replacement=replacement):
+                dashboard = copy.deepcopy(self.dashboard)
+                dashboard["templating"]["list"][1]["query"] = original.replace(
+                    'host=~"$host"', replacement,
+                )
+                with self.assertRaisesRegex(ValueError, "variable service:.*query scope"):
+                    validate_dashboard(dashboard)
+
+    def test_dropdowns_allow_safe_formats_backticks_and_whitespace(self):
+        # Default interpolation belongs in "..." and :regex in backtick strings.
+        for template, quote in (("${name}", '"'), ("${{{name}}}", '"'), ("[[{name}]]", '"'),
+                                ("${{{name}:regex}}", '`'), ("[[{name}:regex]]", '`')):
+            with self.subTest(template=template):
+                dashboard = copy.deepcopy(self.dashboard)
+                for variable in dashboard["templating"]["list"]:
+                    query = variable["query"].replace('"', quote)
+                    for name in ("host", "service"):
+                        query = query.replace(f"${name}", template.format(name=name))
+                    variable["query"] = " \n" + query.replace("label_values(", "label_values( \n ") + " \n"
+                validate_dashboard(dashboard)
+
+    def test_dropdown_choices_on_synthetic_streams_follow_parents(self):
+        streams = [
+            dict(host="host-a", service="shared", level="info", source_type="journald"),
+            dict(host="host-a", service="a-only", level="error", source_type="journald"),
+            dict(host="host-b", service="b-only", level="debug", source_type="journald"),
+            dict(host="host-c", service="other-source", level="trace", source_type="other"),
+        ]
+        selected_values = dict(host="host-a", service="a-only")
+        expected = dict(host={"host-a", "host-b"}, service={"shared", "a-only"}, level={"error"})
+        validate_dashboard(self.dashboard)
+        for variable in self.dashboard["templating"]["list"]:
+            with self.subTest(variable=variable["name"]):
+                matchers = selector_matchers(stream_selectors(variable["query"])[0], "test")
+                selected = streams
+                for label, operator, value in matchers:
+                    value = (re.escape(selected_values[value[1:]])
+                             if value.startswith("$") else value)
+                    selected = [stream for stream in selected
+                                if (re.fullmatch(value, stream[label]) is not None
+                                    if operator == "=~" else stream[label] == value)]
+                self.assertEqual({stream[variable["name"]] for stream in selected},
+                                 expected[variable["name"]])
+
+
 class DashboardTargetScopeTests(unittest.TestCase):
+    def test_selector_variable_formatters_are_allowlisted(self):
+        source = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        for index, panel in enumerate(source["panels"]):
+            for target_index, target in enumerate(panel.get("targets", [])):
+                for name in ("host", "service", "level"):
+                    if f"${name}" not in target["expr"]:
+                        continue
+                    for template in ("${{{name}:{formatter}}}", "[[{name}:{formatter}]]"):
+                        for formatter in ("raw", "text", "csv", "glob", "json", "unknown", "regex:raw"):
+                            reference = template.format(name=name, formatter=formatter)
+                            with self.subTest(panel=panel["title"], reference=reference):
+                                dashboard = copy.deepcopy(source)
+                                dashboard["panels"][index]["targets"][target_index]["expr"] = (
+                                    target["expr"].replace(f"${name}", reference)
+                                )
+                                with self.assertRaisesRegex(ValueError, "scope"):
+                                    validate_dashboard(dashboard)
+
+    def test_safe_reference_forms_accept_literal_selected_values(self):
+        # Values stay in variable metadata; the checker must not interpret their
+        # quotes or regex punctuation as query syntax or interpolate them itself.
+        for template, quote in (("${name}", '"'), ("${{{name}}}", '"'), ("[[{name}]]", '"'),
+                                ("${{{name}:regex}}", '`'), ("[[{name}:regex]]", '`')):
+            with self.subTest(template=template):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                for variable in dashboard["templating"]["list"]:
+                    value = 'synthetic."quoted"[value](a|b)+\\tail'
+                    variable["current"] = dict(text=value, value=value)
+                for _, target in query_targets(dashboard["panels"]):
+                    for name in ("host", "service", "level"):
+                        target["expr"] = target["expr"].replace(
+                            f'"${name}"', quote + template.format(name=name) + quote,
+                        )
+                validate_dashboard(dashboard)
+
+    def test_formatter_must_match_the_string_quoting(self):
+        # Default interpolation double-escapes for "..." strings; :regex writes
+        # single backslashes for backtick raw strings. Mixing them breaks values.
+        for replacement in ("`$host`", "`${host}`", "`[[host]]`",
+                            '"${host:regex}"', '"[[host:regex]]"'):
+            with self.subTest(replacement=replacement):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                target = dashboard["panels"][1]["targets"][0]
+                target["expr"] = target["expr"].replace('"$host"', replacement)
+                with self.assertRaisesRegex(ValueError, "unsupported host selector formatter"):
+                    validate_dashboard(dashboard)
+
+    def test_extra_matcher_cannot_use_an_unsafe_formatter(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        target = dashboard["panels"][1]["targets"][0]
+        target["expr"] = target["expr"].replace(
+            'level=~"$level"', 'level=~"$level", extra=~"${host:raw}"',
+        )
+        with self.assertRaisesRegex(ValueError, "scope"):
+            validate_dashboard(dashboard)
+
     def test_added_unscoped_target_is_rejected_in_any_position_or_visibility(self):
         for hidden in (False, True):
             for reverse in (False, True):
@@ -209,8 +351,8 @@ class DashboardTargetScopeTests(unittest.TestCase):
         dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
         target = dashboard["panels"][1]["targets"][0]
         target["expr"] = (
-            'sum(count_over_time({source_type=`journald`, host=~`$host`, '
-            'service=~"${service:regex}", level=~"$level"} '
+            'sum(count_over_time({source_type=`journald`, host=~`${host:regex}`, '
+            'service=~"$service", level=~"$level"} '
             '| line_format "{{.message}}" | label_format x=`{{.host}}` [5m]))'
         )
         validate_dashboard(dashboard)

@@ -130,12 +130,68 @@ def selector_matchers(selector, context):
         match = MATCHER.match(selector, position)
         require(match, context + ": unparseable selector")
         label, operator, literal = match.groups()
-        matchers.append((label, operator, literal[1:-1]))
+        content = literal[1:-1]
+        for reference in VARIABLE.finditer(content):
+            name = next(group for group in reference.groups() if group is not None)
+            if name in ("host", "service", "level"):
+                require(re.fullmatch(selector_reference(name, literal[0]), reference.group()),
+                        context + f": unsupported {name} selector formatter")
+        matchers.append((label, operator, content))
         position = match.end()
         if position == len(selector):
             return matchers
         require(selector[position] == ",", context + ": unparseable selector")
         position += 1
+
+
+def selector_reference(name, quote=None):
+    """Allowed reference forms, tied to the string literal's quoting.
+
+    Default Loki interpolation escapes regex backslashes a second time for a
+    double-quoted LogQL string, so it is only correct inside "...". The
+    `:regex` formatter writes single backslashes and leaves quotes alone, so it
+    is only correct inside a backtick raw string. Without a quote, either form
+    matches (the quote-specific check runs on every parsed matcher).
+    """
+    default = rf'\${name}|\$\{{{name}\}}|\[\[{name}\]\]'
+    regex = rf'\$\{{{name}:regex\}}|\[\[{name}:regex\]\]'
+    if quote == '"':
+        return rf'(?:{default})'
+    if quote == '`':
+        return rf'(?:{regex})'
+    return rf'(?:{default}|{regex})'
+
+
+def require_scope_matchers(matchers, required, context):
+    for label, (operator, value) in required.items():
+        require(any(name == label and op == operator and re.fullmatch(value, content)
+                    for name, op, content in matchers),
+                context + f": expected {label} filter")
+
+
+def check_variable_query_scope(variable):
+    """Check this dashboard's label_values wrapper and parent selectors only."""
+    name = variable["name"]
+    if name not in ("host", "service", "level"):
+        return
+    context = f"variable {name}: invalid query scope"
+    query = variable["query"]
+    prefix = re.match(r'\s*label_values\s*\(\s*', query)
+    require(prefix, context + ": expected label_values(selector, label)")
+    selectors = stream_selectors(query)
+    require(len(selectors) == 1, context + ": expected one selector")
+    selector = "{" + selectors[0] + "}"
+    require(query.startswith(selector, prefix.end()),
+            context + ": expected selector argument")
+    suffix = query[prefix.end() + len(selector):]
+    require(re.fullmatch(rf'\s*,\s*{name}\s*\)\s*', suffix),
+            context + f": expected returned label {name}")
+    required = {"source_type": ("=", r"journald")}
+    if name in ("service", "level"):
+        required["host"] = ("=~", selector_reference("host"))
+    if name == "level":
+        required["service"] = ("=~", selector_reference("service"))
+    require_scope_matchers(selector_matchers(selectors[0], context), required, context)
 
 
 def check_target_scope(panel, target):
@@ -145,10 +201,7 @@ def check_target_scope(panel, target):
     require(selectors, context + ": missing selector")
     required = {"source_type": ("=", r"journald")}
     for label in ("host", "service", "level"):
-        # The filter contract also supports the documented Grafana reference forms.
-        reference = (rf'(?:\${label}|\$\{{{label}(?::[^{{}}"`]+)?\}}'
-                     rf'|\[\[{label}(?::[^\[\]"`]+)?\]\])')
-        required[label] = ("=~", reference)
+        required[label] = ("=~", selector_reference(label))
     if panel["title"] in ERROR_PANELS:
         required["level"] = ("=~", r"error\|critical\|alert\|emerg")
     elif panel["title"] == "Log Volume by Level":
@@ -158,10 +211,7 @@ def check_target_scope(panel, target):
                 context + ": unexpected level variable")
     for selector in selectors:
         matchers = selector_matchers(selector, context)
-        for label, (operator, value) in required.items():
-            require(any(name == label and op == operator and re.fullmatch(value, content)
-                        for name, op, content in matchers),
-                    context + f": expected {label} filter")
+        require_scope_matchers(matchers, required, context)
         if panel["title"] == "Log Volume by Level":
             require(all(name != "level" for name, _, _ in matchers),
                     context + ": volume must compare all levels")
@@ -301,6 +351,9 @@ def validate_dashboard(dashboard):
             elif dependency not in visited:
                 active.add(dependency)
                 stack.append((dependency, iter(sorted(dependencies[dependency]))))
+
+    for variable in variables:
+        check_variable_query_scope(variable)
 
 
 def main():
