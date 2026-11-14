@@ -1,0 +1,474 @@
+{
+  "grafana_version": "13.0.0",
+  "scenes_version": "7.3.8",
+  "loki_version": "3.6.0",
+  "sources": {
+    "datasource": "https://github.com/grafana/grafana/blob/v13.0.0/public/app/plugins/datasource/loki/datasource.ts",
+    "escapeRegex": "https://github.com/grafana/grafana/blob/v13.0.0/packages/grafana-data/src/text/string.ts",
+    "formatter": "https://www.npmjs.com/package/@grafana/scenes/v/7.3.8",
+    "parser": "https://github.com/grafana/loki/blob/v3.6.0/pkg/logql/syntax/parser.go"
+  },
+  "source_sha256": {
+    "datasource.ts": "52ae0f34f9ea18134c13b773a1eb616465c2269df63b1c74d7724486c77541eb",
+    "string.ts": "656380b2ad5c2782328591f84d74e50ac1edbf6baec88ac9a8ce019522bc1f6d",
+    "scenes.tgz": "25d66e951406b5c276cbcefb6c69db5e2dea135a87ca9c24bbf43407bc105412"
+  },
+  "cases": [
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\"synthetic`tail\", level=~\"info\"}",
+      "matches": [
+        0
+      ],
+      "name": "backtick",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic`tail",
+        "source_type": "journald"
+      },
+      "raw": false,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic`tail",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "synthetic`tail"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~`synthetic`tail`, level=~\"info\"}",
+      "name": "backtick",
+      "parse_ok": false,
+      "raw": true,
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~`${service:regex}`, level=~\"$level\"}",
+      "values": [
+        "synthetic`tail"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\"synthetic\"tail\", level=~\"info\"}",
+      "name": "quote",
+      "parse_ok": false,
+      "raw": false,
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "synthetic\"tail"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~`synthetic\"tail`, level=~\"info\"}",
+      "matches": [
+        0
+      ],
+      "name": "quote",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic\"tail",
+        "source_type": "journald"
+      },
+      "raw": true,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic\"tail",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~`${service:regex}`, level=~\"$level\"}",
+      "values": [
+        "synthetic\"tail"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\"synthetic\\\\\\\\tail\", level=~\"info\"}",
+      "matches": [
+        0
+      ],
+      "name": "backslash",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic\\\\tail",
+        "source_type": "journald"
+      },
+      "raw": false,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic\\tail",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "synthetic\\tail"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~`synthetic\\\\tail`, level=~\"info\"}",
+      "matches": [
+        0
+      ],
+      "name": "backslash",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic\\\\tail",
+        "source_type": "journald"
+      },
+      "raw": true,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic\\tail",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~`${service:regex}`, level=~\"$level\"}",
+      "values": [
+        "synthetic\\tail"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\"synthetic\\\\.\\\\[a\\\\|b\\\\]\\\\+\\\\(x\\\\)\\\\{2\\\\}\\\\^\\\\$\\\\?\", level=~\"info\"}",
+      "matches": [
+        0
+      ],
+      "name": "regex",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic\\.\\[a\\|b\\]\\+\\(x\\)\\{2\\}\\^\\$\\?",
+        "source_type": "journald"
+      },
+      "raw": false,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic.[a|b]+(x){2}^$?",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "synthetic.[a|b]+(x){2}^$?"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~`synthetic\\.\\[a\\|b\\]\\+\\(x\\)\\{2\\}\\^\\$\\?`, level=~\"info\"}",
+      "matches": [
+        0
+      ],
+      "name": "regex",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic\\.\\[a\\|b\\]\\+\\(x\\)\\{2\\}\\^\\$\\?",
+        "source_type": "journald"
+      },
+      "raw": true,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic.[a|b]+(x){2}^$?",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~`${service:regex}`, level=~\"$level\"}",
+      "values": [
+        "synthetic.[a|b]+(x){2}^$?"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\"synthetic\"\\\\} or \\\\{source_type=\"other\", level=~\"info\"}",
+      "name": "selector",
+      "parse_ok": false,
+      "raw": false,
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "synthetic\"} or {source_type=\"other"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~`synthetic\"\\} or \\{source_type=\"other`, level=~\"info\"}",
+      "matches": [
+        0
+      ],
+      "name": "selector",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic\"\\} or \\{source_type=\"other",
+        "source_type": "journald"
+      },
+      "raw": true,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic\"} or {source_type=\"other",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~`${service:regex}`, level=~\"$level\"}",
+      "values": [
+        "synthetic\"} or {source_type=\"other"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\"synthetic`tail|synthetic\\\\.\\\\[a\\\\|b\\\\]\\\\+\", level=~\"info\"}",
+      "matches": [
+        0,
+        1
+      ],
+      "name": "multi",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "synthetic`tail|synthetic\\.\\[a\\|b\\]\\+",
+        "source_type": "journald"
+      },
+      "raw": false,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic`tail",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "synthetic.[a|b]+",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "synthetic`tail",
+        "synthetic.[a|b]+"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~`(synthetic`tail|synthetic\\.\\[a\\|b\\]\\+)`, level=~\"info\"}",
+      "name": "multi",
+      "parse_ok": false,
+      "raw": true,
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~`${service:regex}`, level=~\"$level\"}",
+      "values": [
+        "synthetic`tail",
+        "synthetic.[a|b]+"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\".*\", level=~\"info\"}",
+      "matches": [
+        0,
+        1,
+        2
+      ],
+      "name": "custom-all",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": ".*",
+        "source_type": "journald"
+      },
+      "raw": false,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "svc-a",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "svc-b",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "svc-a",
+        "svc-b"
+      ]
+    },
+    {
+      "expr": "{source_type=\"journald\", host=~\"host-a\", service=~\"svc\\\\.a|svc`b\", level=~\"info\"}",
+      "matches": [
+        0,
+        1
+      ],
+      "name": "default-all",
+      "parse_ok": true,
+      "patterns": {
+        "host": "host-a",
+        "level": "info",
+        "service": "svc\\.a|svc`b",
+        "source_type": "journald"
+      },
+      "raw": false,
+      "streams": [
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "svc.a",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "svc`b",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "journald"
+        },
+        {
+          "host": "host-a",
+          "level": "info",
+          "service": "unselected-service",
+          "source_type": "other"
+        }
+      ],
+      "template": "{source_type=\"journald\", host=~\"$host\", service=~\"$service\", level=~\"$level\"}",
+      "values": [
+        "svc.a",
+        "svc`b"
+      ]
+    }
+  ]
+}

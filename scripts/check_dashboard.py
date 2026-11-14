@@ -165,21 +165,14 @@ def selector_matchers(selector, context):
 
 
 def selector_reference(name, quote=None):
-    """Allowed reference forms, tied to the string literal's quoting.
+    """Only default Loki interpolation inside double-quoted LogQL strings.
 
-    Default Loki interpolation escapes regex backslashes a second time for a
-    double-quoted LogQL string, so it is only correct inside "...". The
-    `:regex` formatter writes single backslashes and leaves quotes alone, so it
-    is only correct inside a backtick raw string. Without a quote, either form
-    matches (the quote-specific check runs on every parsed matcher).
+    Explicit :regex does not escape a backtick delimiter in producer data.
+    Static backtick strings remain valid, but cannot interpolate scoped filters.
     """
-    default = rf'\${name}|\$\{{{name}\}}|\[\[{name}\]\]'
-    regex = rf'\$\{{{name}:regex\}}|\[\[{name}:regex\]\]'
-    if quote == '"':
-        return rf'(?:{default})'
-    if quote == '`':
-        return rf'(?:{regex})'
-    return rf'(?:{default}|{regex})'
+    if quote not in (None, '"'):
+        return r"(?!)"
+    return rf'(?:\${name}|\$\{{{name}\}}|\[\[{name}\]\])'
 
 
 def require_scope_matchers(matchers, required, context):

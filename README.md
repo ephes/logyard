@@ -97,15 +97,20 @@ Ordinary panels also require `level=~"$level"`. Only the two named error panels
 use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
 matchers to compare all levels. These exceptions cannot reference `$level`.
 Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
-`[[name]]` only inside double-quoted strings, and the explicit `${name:regex}` /
-`[[name:regex]]` forms only inside backtick raw strings. Default Loki
-interpolation escapes regex backslashes a second time for a double-quoted LogQL
-string, while `:regex` writes single backslashes and leaves quotes alone, so each
-form keeps producer label values (for example dotted systemd units) intact only
-with its matching quoting. `:raw`, `:text` and all other formatters are
-rejected, including in additional matchers alongside the required filters. Selected values may
-contain quotes and regex punctuation; they remain Grafana variable data, not
-literal query fragments to paste into the dashboard JSON.
+`[[name]]` only inside double-quoted strings. All explicit formatters, including
+`:regex`, `:raw` and `:text`, are rejected, including in additional matchers
+alongside the required filters. Backtick strings remain supported for static
+values and pipeline templates, but cannot interpolate these filters: `:regex`
+does not escape a literal backtick in producer label data.
+Default Loki interpolation escapes regex backslashes a second time for a
+double-quoted LogQL string, preserving backticks, backslashes and regex
+punctuation as literal data. **Known upstream limitation:** the pinned Grafana
+v13.0.0 formatter does not escape double quotes. Label values containing `"`
+can break the query; the checker does not promise safe execution for them.
+The offline [interpolation oracle](tests/fixtures/README.md) records this failure
+alongside successful literal selections using the real Loki v3.6.0 parser.
+Supporting quotes needs a separately agreed formatter policy; the provisioned
+asset and producer label policy are unchanged by this checker fix.
 Each brace selector outside
 string literals is split into whole `label op "value"` (or backtick) matchers,
 so text inside a quoted or backtick string never counts as a matcher, and
