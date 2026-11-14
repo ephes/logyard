@@ -96,11 +96,14 @@ contain `source_type="journald"`, `host=~"$host"` and `service=~"$service"`.
 Ordinary panels also require `level=~"$level"`. Only the two named error panels
 use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
 matchers to compare all levels. These exceptions cannot reference `$level`.
-Selector values allow `$name`, `${name}`, `[[name]]` and the explicit
-`${name:regex}` / `[[name:regex]]` forms for `host`, `service` and `level`.
-Default Loki interpolation and `:regex` retain regex escaping for producer
-label values. `:raw`, `:text` and all other formatters are rejected, including
-in additional matchers alongside the required filters. Selected values may
+Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
+`[[name]]` only inside double-quoted strings, and the explicit `${name:regex}` /
+`[[name:regex]]` forms only inside backtick raw strings. Default Loki
+interpolation escapes regex backslashes a second time for a double-quoted LogQL
+string, while `:regex` writes single backslashes and leaves quotes alone, so each
+form keeps producer label values (for example dotted systemd units) intact only
+with its matching quoting. `:raw`, `:text` and all other formatters are
+rejected, including in additional matchers alongside the required filters. Selected values may
 contain quotes and regex punctuation; they remain Grafana variable data, not
 literal query fragments to paste into the dashboard JSON.
 Each brace selector outside

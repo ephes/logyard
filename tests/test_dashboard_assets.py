@@ -214,8 +214,8 @@ class DashboardAssetTests(unittest.TestCase):
 
     def test_defined_formatted_variables_and_allowed_builtins(self):
         self.dashboard["panels"][1]["targets"][0]["expr"] = (
-            '{source_type="journald", host=~"${host:regex}", '
-            'service=~"[[service:regex]]", level=~"${level}"}[$__interval]'
+            '{source_type="journald", host=~`${host:regex}`, '
+            'service=~`[[service:regex]]`, level=~"${level}"}[$__interval]'
         )
         validate_dashboard(self.dashboard)
         self.dashboard["panels"][1]["targets"][0]["expr"] = "$__unknown"
@@ -245,8 +245,8 @@ class DashboardAssetTests(unittest.TestCase):
     def test_acyclic_formatted_dependencies_and_globals_are_allowed(self):
         variables = self.dashboard["templating"]["list"]
         variables[0]["query"] = 'label_values({source_type="journald", time="$__from"}, host)'
-        variables[1]["query"] = variables[1]["query"].replace("$host", "${host:regex}")
-        variables[2]["query"] = variables[2]["query"].replace("$service", "[[service:regex]]")
+        variables[1]["query"] = variables[1]["query"].replace('"$host"', "`${host:regex}`")
+        variables[2]["query"] = variables[2]["query"].replace('"$service"', "`[[service:regex]]`")
         # Declaration order does not determine the dependency order.
         self.dashboard["templating"]["list"].reverse()
         validate_dashboard(self.dashboard)

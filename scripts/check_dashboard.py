@@ -134,7 +134,7 @@ def selector_matchers(selector, context):
         for reference in VARIABLE.finditer(content):
             name = next(group for group in reference.groups() if group is not None)
             if name in ("host", "service", "level"):
-                require(re.fullmatch(selector_reference(name), reference.group()),
+                require(re.fullmatch(selector_reference(name, literal[0]), reference.group()),
                         context + f": unsupported {name} selector formatter")
         matchers.append((label, operator, content))
         position = match.end()
@@ -144,9 +144,22 @@ def selector_matchers(selector, context):
         position += 1
 
 
-def selector_reference(name):
-    """Only default Loki interpolation and explicit regex formatting are allowed."""
-    return rf'(?:\${name}|\$\{{{name}(?::regex)?\}}|\[\[{name}(?::regex)?\]\])'
+def selector_reference(name, quote=None):
+    """Allowed reference forms, tied to the string literal's quoting.
+
+    Default Loki interpolation escapes regex backslashes a second time for a
+    double-quoted LogQL string, so it is only correct inside "...". The
+    `:regex` formatter writes single backslashes and leaves quotes alone, so it
+    is only correct inside a backtick raw string. Without a quote, either form
+    matches (the quote-specific check runs on every parsed matcher).
+    """
+    default = rf'\${name}|\$\{{{name}\}}|\[\[{name}\]\]'
+    regex = rf'\$\{{{name}:regex\}}|\[\[{name}:regex\]\]'
+    if quote == '"':
+        return rf'(?:{default})'
+    if quote == '`':
+        return rf'(?:{regex})'
+    return rf'(?:{default}|{regex})'
 
 
 def require_scope_matchers(matchers, required, context):
