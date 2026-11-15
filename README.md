@@ -142,6 +142,9 @@ positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
+Within each collapsed row, saved siblings must not overlap each other; touching
+edges are allowed. Each nested row has its own saved layout, so its children may
+share coordinates with panels outside that row, including visible panels.
 Every row must have a boolean `collapsed` flag. Only rows may have a `panels`
 list; an expanded row may have an empty list, but its children live at the top
 level and are checked there. Leaf panels cannot store children.

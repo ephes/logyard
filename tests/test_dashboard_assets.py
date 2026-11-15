@@ -738,6 +738,45 @@ class DashboardDepthTests(unittest.TestCase):
 
 
 class DashboardChildGridTests(unittest.TestCase):
+    def query_children(self):
+        prototype = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))["panels"][1]
+        children = [copy.deepcopy(prototype) for _ in range(2)]
+        for index, child in enumerate(children):
+            child.update(id=100 + index, gridPos=dict(x=0, y=0, w=6, h=4))
+        return children
+
+    def test_saved_siblings_cannot_overlap_including_nested_rows(self):
+        for nested in (False, True):
+            for x, y in ((0, 0), (5, 3)):
+                with self.subTest(nested=nested, x=x, y=y):
+                    dashboard = synthetic_dashboard()
+                    children = self.query_children()
+                    children[1]["gridPos"].update(x=x, y=y)
+                    parent = row(children)
+                    if nested:
+                        parent = dict(row([parent]), id=98)
+                    dashboard["panels"] = [parent]
+                    with self.assertRaisesRegex(ValueError, "panels 100 and 101 overlap"):
+                        validate_dashboard(dashboard)
+
+    def test_saved_siblings_can_be_disjoint_or_touch_edges(self):
+        for x, y in ((6, 0), (0, 4), (7, 5)):
+            with self.subTest(x=x, y=y):
+                dashboard = synthetic_dashboard()
+                children = self.query_children()
+                children[1]["gridPos"].update(x=x, y=y)
+                dashboard["panels"] = [row(children)]
+                validate_dashboard(dashboard)
+
+    def test_saved_siblings_are_scoped_to_their_own_row(self):
+        dashboard = synthetic_dashboard()
+        first, second = self.query_children()
+        # Both children overlap the visible text panel and each other, but
+        # belong to separate saved layouts with disjoint visible headers.
+        other_row = dict(row([second]), id=98, gridPos=dict(x=0, y=102, w=24, h=1))
+        dashboard["panels"].extend([row([first]), other_row])
+        validate_dashboard(dashboard)
+
     def test_saved_child_grid_shapes_are_validated_at_each_level(self):
         valid = dict(x=0, y=100, w=24, h=1)
         invalid_grids = [None, {}, dict(x=0, y=100, w=24)]

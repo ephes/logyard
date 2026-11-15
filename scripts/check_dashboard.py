@@ -295,9 +295,11 @@ def validate_dashboard(dashboard):
         check_references(variable["query"], logql=True)
 
     panel_ids = set()
+    layout_scopes = []
 
     def check_panels(panels):
         require(isinstance(panels, list), "panels must be a list")
+        layout_scopes.append(panels)
         for panel in panels:
             require(isinstance(panel, dict), "panel must be an object")
             panel_id = panel.get("id")
@@ -365,15 +367,17 @@ def validate_dashboard(dashboard):
         if (owner, key) not in query_fields:
             check_references(value)
 
-    # Row headers occupy the visible grid. Collapsed rows' saved children do
-    # not; expanded row children appear in the top-level panels list instead.
-    rectangles = []
-    for panel in panels:
-        x, y, w, h = (panel["gridPos"][key] for key in ("x", "y", "w", "h"))
-        for other_id, left, top, right, bottom in rectangles:
-            require(not (x < right and left < x + w and y < bottom and top < y + h),
-                    f"panels {other_id} and {panel['id']} overlap")
-        rectangles.append((panel["id"], x, y, x + w, y + h))
+    # Check only siblings in each layout, after admitting the global panel
+    # budget. Saved children occupy their own grid, separate from their header
+    # and visible panels; expanded row children already live at the top level.
+    for siblings in layout_scopes:
+        rectangles = []
+        for panel in siblings:
+            x, y, w, h = (panel["gridPos"][key] for key in ("x", "y", "w", "h"))
+            for other_id, left, top, right, bottom in rectangles:
+                require(not (x < right and left < x + w and y < bottom and top < y + h),
+                        f"panels {other_id} and {panel['id']} overlap")
+            rectangles.append((panel["id"], x, y, x + w, y + h))
 
     dependencies = {
         # Grafana finds dependencies in the whole query text, comments included.
