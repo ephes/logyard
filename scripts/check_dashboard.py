@@ -54,7 +54,7 @@ def reject_constant(value):
 
 
 def read_asset(path):
-    """Read one regular-file descriptor, bounded even if it grows after fstat."""
+    """Read bounded bytes from one descriptor, refusing detected input changes."""
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     descriptor = os.open(path, flags)
     try:
@@ -65,6 +65,14 @@ def read_asset(path):
         with os.fdopen(descriptor, "rb", closefd=False) as stream:
             content = stream.read(MAX_ASSET_BYTES + 1)
         require(len(content) <= MAX_ASSET_BYTES, message)
+        final = os.fstat(descriptor)
+        # Do not restat the path: an atomic replacement may leave us holding
+        # coherent old bytes. A ctime change (including unlink) is conservatively
+        # refused, even if the content itself may not have changed.
+        generation_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        require(all(getattr(info, field) == getattr(final, field) for field in generation_fields)
+                and len(content) == info.st_size,
+                "dashboard changed while reading")
         return content.decode("utf-8")
     finally:
         os.close(descriptor)
