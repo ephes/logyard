@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Refuse additional query-variable interpolation in panel targets and
+  selector-bearing dropdown queries until an escaping/All policy is supported;
+  validate core-filter formatters in additional dropdown selectors too.
+
 - Bound dashboard CLI failure diagnostics to one escaped ASCII line of at most
   1,024 bytes; avoid rendering rejected panel ids and clip identifier/cycle
   previews without changing the asset.

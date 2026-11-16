@@ -207,18 +207,34 @@ def require_scope_matchers(matchers, required, context):
                 context + f": expected {label} filter")
 
 
-def check_variable_query_scope(variable):
-    """Check this dashboard's label_values wrapper and parent selectors only."""
+def check_executable_variables(query, context, variable_names):
+    """Only the three policy-scoped filters may inject custom query values.
+
+    Grafana interpolates comments and pipeline strings too, so inspect the
+    entire query. Additional dropdowns need their own agreed escaping/All
+    contract before their values can be used in executable queries.
+    """
+    additional = variable_names - {"host", "service", "level"}
+    for name in sorted(variable_references(query) & additional):
+        raise ValueError(context + f": unsupported additional variable {diagnostic_text(name)}")
+
+
+def check_variable_query_scope(variable, variable_names):
+    """Check selector interpolation plus the three filters' dropdown scope."""
     name = variable["name"]
+    context = f"variable {diagnostic_text(name)}: invalid query scope"
+    query = variable["query"]
+    selectors = stream_selectors(query)
+    if selectors:
+        check_executable_variables(query, context, variable_names)
+        for selector in selectors:
+            selector_matchers(selector, context)
     if name not in ("host", "service", "level"):
         return
-    context = f"variable {diagnostic_text(name)}: invalid query scope"
     # Raw text, as Grafana's migrateVariableQuery matches it: a LogQL comment in
     # or after the wrapper makes Grafana fall back to a label-names query.
-    query = variable["query"]
     prefix = re.match(r'\s*label_values\s*\(\s*', query)
     require(prefix, context + ": expected label_values(selector, label)")
-    selectors = stream_selectors(query)
     require(len(selectors) == 1, context + ": expected one selector")
     selector = "{" + selectors[0] + "}"
     require(query.startswith(selector, prefix.end()),
@@ -234,10 +250,11 @@ def check_variable_query_scope(variable):
     require_scope_matchers(selector_matchers(selectors[0], context), required, context)
 
 
-def check_target_scope(panel, target):
+def check_target_scope(panel, target, variable_names):
     """Enforce this asset's label policy, without parsing LogQL expressions."""
     context = (f"panel {diagnostic_text(panel['id'])}: "
                f"target {diagnostic_text(target['refId'])}: invalid query scope")
+    check_executable_variables(target["expr"], context, variable_names)
     selectors = stream_selectors(target["expr"])
     require(selectors, context + ": missing selector")
     required = {"source_type": ("=", r"journald")}
@@ -382,7 +399,7 @@ def validate_dashboard(dashboard):
                     expected_mode = QUERY_MODES.get(panel["type"])
                     require(expected_mode is None or mode == expected_mode,
                             f"panel {panel_id}: {diagnostic_text(panel['type'])} target queryType must be {expected_mode}")
-                    check_target_scope(panel, target)
+                    check_target_scope(panel, target, names)
                 require(any(not target.get("hide", False) for target in targets),
                         f"panel {panel_id}: needs at least one visible target")
             if "panels" in panel:
@@ -438,7 +455,7 @@ def validate_dashboard(dashboard):
                 stack.append((dependency, iter(sorted(dependencies[dependency]))))
 
     for variable in variables:
-        check_variable_query_scope(variable)
+        check_variable_query_scope(variable, names)
 
 
 def main():

@@ -297,6 +297,89 @@ class DashboardInterpolationOracleTests(unittest.TestCase):
                 self.assertNotIn("matches", case)
 
 
+class DashboardExtraVariableTests(unittest.TestCase):
+    def dashboard_with_extra(self, **options):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        dashboard["templating"]["list"].append(dict(
+            name="extra", type="query",
+            query='label_values({source_type="journald", host=~"$host", '
+                  'service=~"$service"}, environment)',
+            datasource=dict(type="loki", uid="logyard-loki"), **options,
+        ))
+        return dashboard
+
+    def test_additional_dropdowns_can_use_the_supported_parent_filters(self):
+        for template in ("$host", "${host}", "[[host]]"):
+            with self.subTest(template=template):
+                dashboard = self.dashboard_with_extra(includeAll=True, allValue=".*")
+                variable = dashboard["templating"]["list"][-1]
+                variable["query"] = variable["query"].replace("$host", template)
+                dashboard["description"] = "Display metadata may still reference ${extra:text}"
+                validate_dashboard(dashboard)
+
+    def test_additional_variables_are_refused_in_target_interpolation(self):
+        for reference in ("$extra", "${extra}", "[[extra]]", "${extra:raw}",
+                          "[[extra:raw]]", "${extra:regex}"):
+            for all_value in (None, ".*", '.*"} or {service=~".*'):
+                for hidden, nested in ((False, False), (True, False), (True, True)):
+                    with self.subTest(reference=reference, all_value=all_value,
+                                      hidden=hidden, nested=nested):
+                        dashboard = self.dashboard_with_extra(includeAll=True, allValue=all_value)
+                        panel = dashboard["panels"][1]
+                        helper = copy.deepcopy(panel["targets"][0])
+                        helper.update(refId="B", hide=hidden)
+                        helper["expr"] = helper["expr"].replace(
+                            'source_type="journald"',
+                            f'source_type="journald", environment=~"{reference}"',
+                        )
+                        panel["targets"].append(helper)
+                        if nested:
+                            dashboard["panels"][1] = dict(
+                                id=100, title="Row", type="row", collapsed=True,
+                                gridPos=dict(x=0, y=10, w=6, h=4), panels=[panel],
+                            )
+                        with self.assertRaisesRegex(ValueError, "unsupported additional variable extra"):
+                            validate_dashboard(dashboard)
+
+    def test_additional_variables_cannot_bypass_selectors_via_pipeline_or_comment(self):
+        for suffix in (' |~ "${extra:raw}"', ' # ${extra:raw}'):
+            with self.subTest(suffix=suffix):
+                dashboard = self.dashboard_with_extra()
+                dashboard["panels"][1]["targets"][0]["expr"] += suffix
+                with self.assertRaisesRegex(ValueError, "unsupported additional variable extra"):
+                    validate_dashboard(dashboard)
+
+    def test_additional_variable_interpolation_is_refused_in_dropdown_selectors(self):
+        for reference in ("$extra", "${extra:raw}", "[[extra:raw]]"):
+            for name in ("service", "choices"):
+                with self.subTest(reference=reference, name=name):
+                    dashboard = self.dashboard_with_extra(includeAll=True,
+                                                          allValue='.*"} or {host=~".*')
+                    # Keep this fixture acyclic: extra depends only on host.
+                    dashboard["templating"]["list"][-1]["query"] = (
+                        'label_values({source_type="journald", host=~"$host"}, environment)'
+                    )
+                    variable = dict(name=name, type="query",
+                                    query='label_values({source_type="journald", host=~"$host", '
+                                          f'environment=~"{reference}"}}, service)',
+                                    datasource=dict(type="loki", uid="logyard-loki"), includeAll=True)
+                    if name == "service":
+                        dashboard["templating"]["list"][1] = variable
+                    else:
+                        dashboard["templating"]["list"].append(variable)
+                    with self.assertRaisesRegex(ValueError, "unsupported additional variable extra"):
+                        validate_dashboard(dashboard)
+
+    def test_additional_dropdowns_also_validate_core_selector_formatters(self):
+        for reference in ("${host:raw}", "[[host:regex]]"):
+            with self.subTest(reference=reference):
+                dashboard = self.dashboard_with_extra()
+                variable = dashboard["templating"]["list"][-1]
+                variable["query"] = variable["query"].replace("$host", reference)
+                with self.assertRaisesRegex(ValueError, "unsupported host selector formatter"):
+                    validate_dashboard(dashboard)
+
+
 class DashboardTargetScopeTests(unittest.TestCase):
     def test_selector_variable_formatters_are_allowlisted(self):
         source = json.loads(DASHBOARD.read_text(encoding="utf-8"))
