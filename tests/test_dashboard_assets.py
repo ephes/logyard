@@ -1,7 +1,7 @@
 """Synthetic failures for the offline asset check."""
 
 import copy
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import io
 import json
 import os
@@ -617,6 +617,108 @@ class DashboardAdmissionTests(unittest.TestCase):
                 read.assert_called_once_with(self.BYTE_LIMIT + 1)
                 close.assert_called_once()
 
+    def read_with_mutation(self, path, mutate):
+        real_fdopen = os.fdopen
+
+        @contextmanager
+        def open_stream(*args, **kwargs):
+            # Unbuffered so the second chunk actually observes an in-place edit.
+            with real_fdopen(*args, **kwargs, buffering=0) as stream:
+                real_read = stream.read
+
+                def read(limit):
+                    prefix = real_read(64)
+                    mutate()
+                    return prefix + real_read(limit - len(prefix))
+
+                with patch.object(stream, "read", side_effect=read):
+                    yield stream
+
+        with patch("os.fdopen", side_effect=open_stream), \
+                patch("os.close", wraps=os.close) as close:
+            result = self.run_main(path)
+            close.assert_called_once()
+        return result
+
+    def test_equal_size_overwrite_between_read_chunks_is_rejected(self):
+        original = json.dumps(synthetic_dashboard()).encode("utf-8")
+        replacement = original.replace(b'"title": "Synthetic"', b'"title": "Different"')
+        replacement = replacement.replace(b'"title": "Text"', b'"title": "Next"')
+        self.assertNotEqual(original, replacement)
+        self.assertEqual(len(original), len(replacement))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_bytes(original)
+            info = path.stat()
+
+            def overwrite():
+                path.write_bytes(replacement)
+                os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+
+            self.assert_invalid(self.read_with_mutation(path, overwrite),
+                                "dashboard changed while reading")
+
+    def test_generation_and_consumed_length_are_checked(self):
+        content = json.dumps(synthetic_dashboard()).encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            path.write_bytes(content)
+            initial = path.stat()
+            # Isolate every generation field, including ctime when an editor
+            # restores mtime, and length disagreement despite stable metadata.
+            for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"):
+                final = SimpleNamespace(**{
+                    key: getattr(initial, key) + (key == field)
+                    for key in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+                })
+                with self.subTest(field=field), \
+                        patch("os.fstat", side_effect=[initial, final]):
+                    self.assert_invalid(self.run_main(path), "dashboard changed while reading")
+            with io.BytesIO(content[:-1]) as stream, patch("os.fdopen", return_value=stream):
+                self.assert_invalid(self.run_main(path), "dashboard changed while reading")
+
+    def test_atomic_replacement_before_initial_stat_keeps_opened_generation(self):
+        original = json.dumps(synthetic_dashboard()).encode("utf-8")
+        real_fstat = os.fstat
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            replacement = Path(directory) / "replacement.json"
+            path.write_bytes(original)
+            # Deliberately invalid new path: the checker must use the old fd.
+            replacement.write_bytes(b"invalid replacement")
+
+            def replace_then_stat(descriptor):
+                if replacement.exists():
+                    replacement.replace(path)
+                return real_fstat(descriptor)
+
+            with patch("os.fstat", side_effect=replace_then_stat), \
+                    patch("os.open", wraps=os.open) as opener:
+                result = self.run_main(path)
+                opener.assert_called_once()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(path.read_bytes(), b"invalid replacement")
+            self.assert_invalid(self.run_main(path), "Expecting value")
+
+    def test_atomic_replacement_during_read_has_conservative_metadata_policy(self):
+        content = json.dumps(synthetic_dashboard()).encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            replacement = Path(directory) / "replacement.json"
+            path.write_bytes(content)
+            replacement.write_bytes(b"invalid replacement")
+            with path.open("rb") as opened:
+                before = os.fstat(opened.fileno())
+                result = self.read_with_mutation(path, lambda: replacement.replace(path))
+                after = os.fstat(opened.fileno())
+            # POSIX unlink/rename may change the old descriptor's ctime. If so,
+            # refuse conservatively; otherwise the coherent old bytes validate.
+            if before.st_ctime_ns != after.st_ctime_ns:
+                self.assert_invalid(result, "dashboard changed while reading")
+            else:
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Valid dashboard", result.stdout)
+
 
 class DashboardPanelBudgetTests(unittest.TestCase):
     LIMIT = 256
@@ -738,6 +840,45 @@ class DashboardDepthTests(unittest.TestCase):
 
 
 class DashboardChildGridTests(unittest.TestCase):
+    def query_children(self):
+        prototype = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))["panels"][1]
+        children = [copy.deepcopy(prototype) for _ in range(2)]
+        for index, child in enumerate(children):
+            child.update(id=100 + index, gridPos=dict(x=0, y=0, w=6, h=4))
+        return children
+
+    def test_saved_siblings_cannot_overlap_including_nested_rows(self):
+        for nested in (False, True):
+            for x, y in ((0, 0), (5, 3)):
+                with self.subTest(nested=nested, x=x, y=y):
+                    dashboard = synthetic_dashboard()
+                    children = self.query_children()
+                    children[1]["gridPos"].update(x=x, y=y)
+                    parent = row(children)
+                    if nested:
+                        parent = dict(row([parent]), id=98)
+                    dashboard["panels"] = [parent]
+                    with self.assertRaisesRegex(ValueError, "panels 100 and 101 overlap"):
+                        validate_dashboard(dashboard)
+
+    def test_saved_siblings_can_be_disjoint_or_touch_edges(self):
+        for x, y in ((6, 0), (0, 4), (7, 5)):
+            with self.subTest(x=x, y=y):
+                dashboard = synthetic_dashboard()
+                children = self.query_children()
+                children[1]["gridPos"].update(x=x, y=y)
+                dashboard["panels"] = [row(children)]
+                validate_dashboard(dashboard)
+
+    def test_saved_siblings_are_scoped_to_their_own_row(self):
+        dashboard = synthetic_dashboard()
+        first, second = self.query_children()
+        # Both children overlap the visible text panel and each other, but
+        # belong to separate saved layouts with disjoint visible headers.
+        other_row = dict(row([second]), id=98, gridPos=dict(x=0, y=102, w=24, h=1))
+        dashboard["panels"].extend([row([first]), other_row])
+        validate_dashboard(dashboard)
+
     def test_saved_child_grid_shapes_are_validated_at_each_level(self):
         valid = dict(x=0, y=100, w=24, h=1)
         invalid_grids = [None, {}, dict(x=0, y=100, w=24)]

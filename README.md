@@ -80,6 +80,17 @@ files are supported. The checker opens the path once, nonblocking where supporte
 checks the descriptor's type and size before reading, and reads at most the byte
 limit plus one byte to detect growth after the size check. Nonregular files,
 oversized assets and invalid UTF-8 fail with exit 1 and a concise diagnostic.
+After reading, the checker compares the same descriptor's device, inode, size,
+nanosecond modification time and change time, and requires the consumed byte
+count to equal its initial size. Detected changes fail with `dashboard changed
+while reading`. The path is never reopened: an atomic replacement before the
+initial descriptor check can leave coherent old opened bytes that validate;
+later invocations see the new file. A replacement during reading also validates
+the old bytes if descriptor metadata stays stable, but is conservatively refused
+if it changes the old inode's change time (for example, when unlinking it).
+Retry the check on the completed file after a refusal. These metadata checks
+detect ordinary concurrent edits; they do not provide an immutable filesystem
+snapshot or detect every possible write on filesystems with coarse timestamps.
 It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
@@ -142,6 +153,9 @@ positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
+Within each collapsed row, saved siblings must not overlap each other; touching
+edges are allowed. Each nested row has its own saved layout, so its children may
+share coordinates with panels outside that row, including visible panels.
 Every row must have a boolean `collapsed` flag. Only rows may have a `panels`
 list; an expanded row may have an empty list, but its children live at the top
 level and are checked there. Leaf panels cannot store children.
