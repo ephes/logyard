@@ -17,6 +17,7 @@ DEFAULT_PATH = (
 MAX_NESTING = 64
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
+MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
 QUERY_MODES = {"stat": "instant", "bargauge": "instant",
                "logs": "range", "timeseries": "range"}
@@ -32,6 +33,22 @@ VARIABLE = re.compile(
 # One stream matcher: label, operator, and a double-quoted or backtick string.
 MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^`]*`)\s*')
 ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
+
+
+def diagnostic_text(value, limit=128):
+    """Project only bounded scalar text; never repr rejected containers.
+
+    ASCII escaping also makes controls, bidi marks and lone surrogates safe for
+    a terminal. The result's character count equals its UTF-8 byte count.
+    """
+    if type(value) is int:
+        value = str(value) if value.bit_length() <= 128 else "<large integer>"
+    if not isinstance(value, str):
+        return "<invalid value>"
+    escaped = ascii(value[:limit])[1:-1]
+    if len(value) > limit or len(escaped) > limit:
+        return escaped[:limit - 3] + "..."
+    return escaped
 
 
 def require(condition, message):
@@ -190,25 +207,41 @@ def require_scope_matchers(matchers, required, context):
                 context + f": expected {label} filter")
 
 
-def check_variable_query_scope(variable):
-    """Check this dashboard's label_values wrapper and parent selectors only."""
+def check_executable_variables(query, context, variable_names):
+    """Only the three policy-scoped filters may inject custom query values.
+
+    Grafana interpolates comments and pipeline strings too, so inspect the
+    entire query. Additional dropdowns need their own agreed escaping/All
+    contract before their values can be used in executable queries.
+    """
+    additional = variable_names - {"host", "service", "level"}
+    for name in sorted(variable_references(query) & additional):
+        raise ValueError(context + f": unsupported additional variable {diagnostic_text(name)}")
+
+
+def check_variable_query_scope(variable, variable_names):
+    """Check selector interpolation plus the three filters' dropdown scope."""
     name = variable["name"]
+    context = f"variable {diagnostic_text(name)}: invalid query scope"
+    query = variable["query"]
+    selectors = stream_selectors(query)
+    if selectors:
+        check_executable_variables(query, context, variable_names)
+        for selector in selectors:
+            selector_matchers(selector, context)
     if name not in ("host", "service", "level"):
         return
-    context = f"variable {name}: invalid query scope"
     # Raw text, as Grafana's migrateVariableQuery matches it: a LogQL comment in
     # or after the wrapper makes Grafana fall back to a label-names query.
-    query = variable["query"]
     prefix = re.match(r'\s*label_values\s*\(\s*', query)
     require(prefix, context + ": expected label_values(selector, label)")
-    selectors = stream_selectors(query)
     require(len(selectors) == 1, context + ": expected one selector")
     selector = "{" + selectors[0] + "}"
     require(query.startswith(selector, prefix.end()),
             context + ": expected selector argument")
     suffix = query[prefix.end() + len(selector):]
     require(re.fullmatch(rf'\s*,\s*{name}\s*\)\s*', suffix),
-            context + f": expected returned label {name}")
+            context + f": expected returned label {diagnostic_text(name)}")
     required = {"source_type": ("=", r"journald")}
     if name in ("service", "level"):
         required["host"] = ("=~", selector_reference("host"))
@@ -217,9 +250,11 @@ def check_variable_query_scope(variable):
     require_scope_matchers(selector_matchers(selectors[0], context), required, context)
 
 
-def check_target_scope(panel, target):
+def check_target_scope(panel, target, variable_names):
     """Enforce this asset's label policy, without parsing LogQL expressions."""
-    context = f"panel {panel['id']}: target {target['refId']}: invalid query scope"
+    context = (f"panel {diagnostic_text(panel['id'])}: "
+               f"target {diagnostic_text(target['refId'])}: invalid query scope")
+    check_executable_variables(target["expr"], context, variable_names)
     selectors = stream_selectors(target["expr"])
     require(selectors, context + ": missing selector")
     required = {"source_type": ("=", r"journald")}
@@ -260,22 +295,23 @@ def validate_dashboard(dashboard):
         name = variable.get("name")
         require(isinstance(name, str) and re.fullmatch(r"[A-Za-z_]\w*", name),
                 "variable needs a valid name")
-        require(name not in BUILTINS, f"reserved variable name {name}")
-        require(name not in names, f"duplicate variable {name}")
+        display_name = diagnostic_text(name)
+        require(name not in BUILTINS, f"reserved variable name {display_name}")
+        require(name not in names, f"duplicate variable {display_name}")
         names.add(name)
-        require(variable.get("type") == "query", f"{name}: expected query variable")
+        require(variable.get("type") == "query", f"{display_name}: expected query variable")
         require(isinstance(variable.get("query"), str) and variable["query"].strip(),
-                f"{name}: missing query")
-        require(variable.get("datasource") == LOKI, f"{name}: expected Loki datasource {LOKI}")
+                f"{display_name}: missing query")
+        require(variable.get("datasource") == LOKI, f"{display_name}: expected Loki datasource {LOKI}")
         if name in ("host", "service", "level"):
             for option in ("includeAll", "multi"):
                 require(option not in variable or type(variable[option]) is bool,
-                        f"{name}: {option} must be a boolean")
+                        f"{display_name}: {option} must be a boolean")
             require(variable.get("includeAll", False) or variable.get("multi", False),
-                    f"{name}: enable multi or includeAll for literal regex escaping")
+                    f"{display_name}: enable multi or includeAll for literal regex escaping")
             all_value = variable.get("allValue")
             require(all_value is None or (isinstance(all_value, str) and all_value in ("", ".*")),
-                    f"{name}: allValue must be empty or exactly .*")
+                    f"{display_name}: allValue must be empty or exactly .*")
     require({"host", "service", "level"} <= names, "host, service and level variables are required")
 
     # Bound every container, including extensions, before recursive panel checks.
@@ -297,7 +333,7 @@ def validate_dashboard(dashboard):
 
     def check_references(value, *, logql=False):
         for name in variable_references(value, logql=logql):
-            require(name in names or name in BUILTINS, f"undefined variable {name}")
+            require(name in names or name in BUILTINS, f"undefined variable {diagnostic_text(name)}")
 
     for variable in variables:
         check_references(variable["query"], logql=True)
@@ -308,12 +344,13 @@ def validate_dashboard(dashboard):
     def check_panels(panels):
         require(isinstance(panels, list), "panels must be a list")
         layout_scopes.append(panels)
-        for panel in panels:
+        for panel_index, panel in enumerate(panels):
             require(isinstance(panel, dict), "panel must be an object")
             panel_id = panel.get("id")
             require(type(panel_id) is int and panel_id > 0 and panel_id not in panel_ids,
-                    f"invalid or duplicate panel id {panel_id}")
+                    f"invalid or duplicate panel id at index {panel_index}")
             panel_ids.add(panel_id)
+            panel_id = diagnostic_text(panel_id)
             require(len(panel_ids) <= MAX_PANELS,
                     f"panel count exceeds {MAX_PANELS}")
             for key in ("title", "type"):
@@ -331,10 +368,10 @@ def validate_dashboard(dashboard):
             grid = panel.get("gridPos")
             require(isinstance(grid, dict) and all(
                 type(grid.get(key)) is int for key in ("x", "y", "w", "h")
-            ), f"panel {panel['id']}: gridPos needs integer x, y, w, h")
+            ), f"panel {panel_id}: gridPos needs integer x, y, w, h")
             x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
             require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= 24,
-                    f"panel {panel['id']}: gridPos must fit the 24-column grid")
+                    f"panel {panel_id}: gridPos must fit the 24-column grid")
             if panel["type"] not in ("text", "row"):
                 require(panel.get("datasource") == LOKI,
                         f"panel {panel_id}: expected Loki datasource {LOKI}")
@@ -352,7 +389,7 @@ def validate_dashboard(dashboard):
                     check_references(target["expr"], logql=True)
                     ref_id = target["refId"]
                     require(ref_id not in ref_ids,
-                            f"panel {panel_id}: duplicate target refId {ref_id}")
+                            f"panel {panel_id}: duplicate target refId {diagnostic_text(ref_id)}")
                     ref_ids.add(ref_id)
                     require("hide" not in target or type(target["hide"]) is bool,
                             f"panel {panel_id}: target hide must be a boolean")
@@ -361,8 +398,8 @@ def validate_dashboard(dashboard):
                             f"panel {panel_id}: target queryType must be instant or range")
                     expected_mode = QUERY_MODES.get(panel["type"])
                     require(expected_mode is None or mode == expected_mode,
-                            f"panel {panel_id}: {panel['type']} target queryType must be {expected_mode}")
-                    check_target_scope(panel, target)
+                            f"panel {panel_id}: {diagnostic_text(panel['type'])} target queryType must be {expected_mode}")
+                    check_target_scope(panel, target, names)
                 require(any(not target.get("hide", False) for target in targets),
                         f"panel {panel_id}: needs at least one visible target")
             if "panels" in panel:
@@ -384,7 +421,7 @@ def validate_dashboard(dashboard):
             x, y, w, h = (panel["gridPos"][key] for key in ("x", "y", "w", "h"))
             for other_id, left, top, right, bottom in rectangles:
                 require(not (x < right and left < x + w and y < bottom and top < y + h),
-                        f"panels {other_id} and {panel['id']} overlap")
+                        f"panels {diagnostic_text(other_id)} and {diagnostic_text(panel['id'])} overlap")
             rectangles.append((panel["id"], x, y, x + w, y + h))
 
     dependencies = {
@@ -408,14 +445,17 @@ def validate_dashboard(dashboard):
                 active.remove(current)
                 visited.add(current)
             elif dependency in active:
-                path = [entry[0] for entry in stack] + [dependency]
-                raise ValueError(f"variable dependency cycle: {' -> '.join(path)}")
+                path = [diagnostic_text(entry[0]) for entry in stack[:4]]
+                if len(stack) > 4:
+                    path.append("...")
+                path.append(diagnostic_text(dependency))
+                raise ValueError("variable dependency cycle: " + " -> ".join(path))
             elif dependency not in visited:
                 active.add(dependency)
                 stack.append((dependency, iter(sorted(dependencies[dependency]))))
 
     for variable in variables:
-        check_variable_query_scope(variable)
+        check_variable_query_scope(variable, names)
 
 
 def main():
@@ -429,9 +469,11 @@ def main():
     except (OSError, UnicodeError, ValueError, RecursionError) as error:
         if isinstance(error, RecursionError):
             error = "dashboard nesting is too deep"
-        print(f"Invalid dashboard {path}: {error}", file=sys.stderr)
+        prefix = f"Invalid dashboard {diagnostic_text(str(path))}: "
+        message = diagnostic_text(str(error), MAX_DIAGNOSTIC_BYTES - len(prefix) - 1)
+        print(prefix + message, file=sys.stderr)
         return 1
-    print(f"Valid dashboard: {path}")
+    print(f"Valid dashboard: {diagnostic_text(str(path))}")
     return 0
 
 

@@ -145,9 +145,19 @@ all values. Other custom All expressions are rejected even when All is disabled.
 [Grafana does not escape custom All values](https://grafana.com/docs/grafana/latest/visualizations/dashboards/variables/add-template-variables/#custom-all-value),
 so they must never contain matcher syntax or interpolated references. Ordinary
 single and multiple selections use literal regex escaping; custom All `.*`
-intentionally selects every value within the other filters. Extra
-query variables still follow the datasource, reference and dependency checks;
-the dropdown scope policy is specific to these three filters.
+intentionally selects every value within the other filters. Additional query
+variables remain supported as dropdowns with datasource, reference and dependency
+checks. Their selector matchers follow the same formatter/quoting checks for
+`host`, `service` and `level`. Their values cannot be interpolated into any panel
+target expression or any variable query containing a selector: only the three
+policy-scoped filters and the supported built-in globals are allowed there.
+This conservative allowlist rejects additional variables even with default
+formatting or an apparently safe All value, until a separate interpolation
+contract is supported for them. It also covers references in comments and
+pipelines, where Grafana still interpolates values. Additional dropdowns can
+use the supported host/service/level filters in their selectors; selector-free
+variable dependencies and references in display metadata remain supported.
+The required dropdown parent scope is specific to the three filters.
 All panels, including saved children in nested collapsed rows, must have
 positive-size integer `gridPos` rectangles with nonnegative coordinates within
 Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
@@ -183,16 +193,23 @@ strings always count, even after a literal `#`. Titles, descriptions, variable m
 ordinary reference checking; they do not use LogQL comment rules.
 Dependency graphs are walked iteratively: long acyclic chains and shared
 dependencies are supported within the asset byte limit, independently of Python's
-recursion limit. Cycle diagnostics show the dependency path in stable name order.
+recursion limit. Cycle diagnostics show the first four path entries and the closing dependency
+in stable name order, with `...` for omitted entries.
 JSON nesting is limited to 64 container levels, including extension objects and
 saved rows: the dashboard root object is level 1, each nested object or array adds
 one level, and scalar values add none. Excessive nesting during decoding or
 validation fails with exit 1 and a concise diagnostic instead of a traceback.
+CLI validation failures emit one ASCII diagnostic line of at most 1,024 bytes,
+including its final newline. Paths and scalar identifiers are escaped and
+clipped to bounded previews; malformed panel ids report their sibling index
+without formatting the rejected value or nested containers. Terminal controls,
+newlines and Unicode direction marks cannot act on the terminal. The same path
+escaping applies to success output. Validation never rewrites the asset.
 It checks this asset's structure, not the full Grafana schema or LogQL syntax.
 Synthetic fixtures cover invalid assets and dropdown scope without network
-access, provisioning or real logs. GitHub Actions runs both commands on every
-push and pull request; either failure blocks a green run. There are no separate
-lint or type-check gates in this standard-library-only repository.
+access, provisioning or real logs. Run both commands locally before handing off
+changes. There are no separate lint or type-check gates in this
+standard-library-only repository.
 
 ## Source of Truth
 

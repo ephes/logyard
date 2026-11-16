@@ -438,7 +438,7 @@ class DashboardVariableGraphTests(unittest.TestCase):
         dashboard = self.chain()
         dashboard["templating"]["list"][-1]["query"] = "$v1098"
         expected = "variable dependency cycle: " + " -> ".join(
-            [f"v{index:04}" for index in range(1100)] + ["v1098"]
+            [f"v{index:04}" for index in range(4)] + ["...", "v1098"]
         )
         with self.assertRaises(ValueError) as error:
             validate_dashboard(dashboard)
@@ -485,6 +485,47 @@ class DashboardAdmissionTests(unittest.TestCase):
         self.assertIn("Invalid dashboard", result.stderr)
         self.assertIn(diagnostic, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+    def test_diagnostics_are_bounded_ascii_lines_and_preserve_the_asset(self):
+        controls = "\x1b[31m\x1b]52;c;synthetic\x07\n\r\t\x7f\u202e"
+        cases = []
+        for value in (controls, {"nested": [controls + "界" * 2000] * 40}):
+            dashboard = synthetic_dashboard()
+            dashboard["panels"][0]["id"] = value
+            cases.append((dashboard, "panel id"))
+        dashboard = synthetic_dashboard()
+        dashboard["templating"]["list"][0]["name"] = "v" * 20000
+        dashboard["templating"]["list"][0]["type"] = "custom"
+        cases.append((dashboard, "expected query variable"))
+        dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
+        target = dashboard["panels"][1]["targets"][0]
+        target["refId"] = controls + "界" * 20000
+        target["expr"] = '{host="unscoped"}'
+        cases.append((dashboard, "invalid query scope"))
+        for dashboard, diagnostic in cases:
+            with self.subTest(diagnostic=diagnostic), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / (controls.replace("/", "_") + ".json")
+                content = json.dumps(dashboard).encode("utf-8")
+                path.write_bytes(content)
+                result = subprocess.run(
+                    [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                    cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True, timeout=5,
+                )
+                self.assert_invalid(result, diagnostic)
+                self.assertLessEqual(len(result.stderr.encode("utf-8")), 1024)
+                self.assertEqual(result.stderr.count("\n"), 1)
+                self.assertTrue(all(32 <= ord(char) <= 126 for char in result.stderr[:-1]))
+                self.assertEqual(path.read_bytes(), content)
+
+    def test_invalid_panel_id_does_not_construct_a_rejected_value_repr(self):
+        class ReprForbidden(dict):
+            def __repr__(self):
+                raise AssertionError("rejected panel id was formatted")
+
+        dashboard = synthetic_dashboard()
+        dashboard["panels"][0]["id"] = ReprForbidden(nested=["synthetic"] * 1000)
+        with self.assertRaisesRegex(ValueError, "panel id"):
+            validate_dashboard(dashboard)
 
     def test_nonfinite_numbers_are_rejected_everywhere(self):
         for value in (float("nan"), float("inf"), float("-inf")):
