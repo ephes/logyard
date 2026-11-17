@@ -6,7 +6,9 @@ from pathlib import Path
 import re
 import unittest
 
-from scripts.check_dashboard import selector_matchers, stream_selectors, validate_dashboard
+from scripts.check_dashboard import (
+    check_scoped_interpolation, selector_matchers, stream_selectors, validate_dashboard,
+)
 
 
 DASHBOARD = (
@@ -573,6 +575,167 @@ class DashboardTargetScopeTests(unittest.TestCase):
                 target = dashboard["panels"][1]["targets"][0]
                 target["expr"] = f"sum(count_over_time({{{selector}}}[5m]))"
                 with self.assertRaisesRegex(ValueError, "scope"):
+                    validate_dashboard(dashboard)
+
+
+class DashboardScopedInterpolationTests(unittest.TestCase):
+    """Producer label values reach every interpolated position, not only selectors."""
+
+    UNSAFE_SUFFIXES = (
+        ' |~ `{ref}`',
+        ' | label_format x=`{ref}`',
+        ' | x={ref}',
+        ' |= "x" {ref}',
+        ' # {ref}',
+        ' |= "{raw}"',
+        ' |~ "{regex}"',
+        ' | line_format "{text}"',
+    )
+
+    @staticmethod
+    def references(name):
+        return dict(ref=f"${name}", raw=f"${{{name}:raw}}",
+                    regex=f"[[{name}:regex]]", text=f"${{{name}:text}}")
+
+    def recent_logs(self, dashboard):
+        return next(panel for panel in dashboard["panels"]
+                    if panel["title"] == "Recent Logs")["targets"][0]
+
+    def test_pipeline_and_comment_interpolation_needs_default_double_quotes(self):
+        for name in ("host", "service", "level"):
+            for suffix in self.UNSAFE_SUFFIXES:
+                expr_suffix = suffix.format(**self.references(name))
+                with self.subTest(name=name, suffix=expr_suffix):
+                    dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                    self.recent_logs(dashboard)["expr"] += expr_suffix
+                    with self.assertRaisesRegex(
+                        ValueError, f"invalid query scope: unsupported {name} interpolation"
+                    ):
+                        validate_dashboard(dashboard)
+
+    def test_metric_wrappers_cannot_interpolate_scoped_filters(self):
+        for name in ("host", "service", "level"):
+            for template in ("sum by (${name}) (count_over_time({selector}[5m]))",
+                             "sum(count_over_time({selector}[${name}]))"):
+                with self.subTest(name=name, template=template):
+                    dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                    target = self.recent_logs(dashboard)
+                    target["expr"] = template.replace("{selector}", target["expr"]).replace(
+                        "{name}", name)
+                    with self.assertRaisesRegex(
+                        ValueError, f"invalid query scope: unsupported {name} interpolation"
+                    ):
+                        validate_dashboard(dashboard)
+
+    def test_hidden_and_nested_targets_are_checked_too(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        panel = next(panel for panel in dashboard["panels"] if panel["title"] == "Recent Logs")
+        helper = copy.deepcopy(panel["targets"][0])
+        helper.update(refId="B", hide=True)
+        helper["expr"] += " |~ `$service`"
+        panel["targets"].append(helper)
+        dashboard["panels"].remove(panel)
+        dashboard["panels"].append(dict(
+            id=100, title="Row", type="row", collapsed=True,
+            gridPos=dict(x=0, y=100, w=24, h=1), panels=[panel],
+        ))
+        with self.assertRaisesRegex(ValueError, "unsupported service interpolation"):
+            validate_dashboard(dashboard)
+
+    def test_grafana_field_path_and_brace_format_references_are_seen(self):
+        # Grafana also interpolates ${name.fieldPath[:format]} and formats
+        # containing "{"; an unknown format falls back to unescaped output.
+        for name in ("host", "service", "level"):
+            for suffix in (' |~ `${{{name}.0}}`', ' | x=${{{name}.0:raw}}',
+                           ' # ${{{name}.text}}', ' |= "${{{name}.0}}"',
+                           ' |= "${{{name}:a{{b}}"'):
+                expr_suffix = suffix.format(name=name)
+                with self.subTest(name=name, suffix=expr_suffix):
+                    dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                    self.recent_logs(dashboard)["expr"] += expr_suffix
+                    with self.assertRaisesRegex(
+                        ValueError, f"unsupported ({name} interpolation|variable reference syntax)"
+                    ):
+                        validate_dashboard(dashboard)
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        target = self.recent_logs(dashboard)
+        target["expr"] = target["expr"].replace('"$host"', '"${host.0}"')
+        with self.assertRaisesRegex(ValueError, "unsupported host selector formatter"):
+            validate_dashboard(dashboard)
+
+    def test_reference_text_cannot_carry_logql_string_or_comment_syntax(self):
+        for reference in ('${__interval:a"}', '${__interval.a`b}', '${__range:x#y}',
+                          '${__range.a{b}', '${__from:a\nb}', '${__interval:$host}',
+                          '${__interval.[[host]]}', '${1}', '${__interval:',
+                          '${__interval:' + 'x' * 129 + '}',
+                          '${host.' + 'x' * 129 + '}'):
+            with self.subTest(reference=reference, field="target"):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                self.recent_logs(dashboard)["expr"] += f' |= "x" {reference}'
+                with self.assertRaisesRegex(
+                    ValueError, "panel 8: invalid target: unsupported variable reference syntax"
+                ):
+                    validate_dashboard(dashboard)
+            with self.subTest(reference=reference, field="variable"):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                dashboard["templating"]["list"][0]["query"] += f" {reference}"
+                with self.assertRaisesRegex(
+                    ValueError, "variable host: invalid query: unsupported variable reference syntax"
+                ):
+                    validate_dashboard(dashboard)
+
+    def test_bracket_references_follow_grafana_word_formats(self):
+        # Grafana's [[name:format]] takes only word formats, so it interpolates
+        # the $host inside [[__interval:$host]] on its own.
+        for suffix in (' |= "x" [[__interval:$host]]', ' # [[__interval:$host]]'):
+            with self.subTest(suffix=suffix):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                self.recent_logs(dashboard)["expr"] += suffix
+                with self.assertRaisesRegex(ValueError, "unsupported host interpolation"):
+                    validate_dashboard(dashboard)
+
+    def test_reference_names_are_ascii_like_grafana(self):
+        # JavaScript \w is ASCII-only: Grafana reads "$hostä" as $host.
+        for suffix in (' # $hostä', ' # x $levelı'):
+            with self.subTest(suffix=suffix):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                self.recent_logs(dashboard)["expr"] += suffix
+                with self.assertRaisesRegex(ValueError, "unsupported (host|level) interpolation"):
+                    validate_dashboard(dashboard)
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        dashboard["templating"]["list"].append(dict(
+            name="hostä", type="query", query="label_values(environment)",
+            datasource=dict(type="loki", uid="logyard-loki"),
+        ))
+        with self.assertRaisesRegex(ValueError, "variable needs a valid name"):
+            validate_dashboard(dashboard)
+
+    def test_quotes_inside_other_references_do_not_open_strings(self):
+        # Grafana replaces the whole reference before Loki tokenizes the query,
+        # so its text cannot make a later reference "quoted". The dashboard
+        # gate refuses such reference text first; this is defense in depth.
+        with self.assertRaisesRegex(ValueError, "unsupported host interpolation"):
+            check_scoped_interpolation(' |= ${__interval:a"} $host ${__range:b"}', "ctx")
+
+    def test_default_double_quoted_pipeline_interpolation_remains_valid(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        self.recent_logs(dashboard)["expr"] += (
+            ' |= "$host" |~ "${service}" | line_format "{{.message}} [[level]]"'
+            ' | label_format x=`{{.host}}` # static note'
+        )
+        validate_dashboard(dashboard)
+
+    def test_selector_bearing_variable_queries_are_checked_outside_selectors(self):
+        for reference in ("${host:raw}", "$host"):
+            with self.subTest(reference=reference):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                dashboard["templating"]["list"].append(dict(
+                    name="extra", type="query",
+                    query='label_values({source_type="journald", '
+                          f'service=~"$service"}}, {reference})',
+                    datasource=dict(type="loki", uid="logyard-loki"),
+                ))
+                with self.assertRaisesRegex(ValueError, "unsupported host interpolation"):
                     validate_dashboard(dashboard)
 
 

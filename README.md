@@ -113,6 +113,22 @@ Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
 alongside the required filters. Backtick strings remain supported for static
 values and pipeline templates, but cannot interpolate these filters: `:regex`
 does not escape a literal backtick in producer label data.
+The same rule covers the whole target expression and every variable query that
+contains a selector, not only the selectors: Grafana interpolates producer label
+values into pipeline stages, metric wrappers and comments too. References to
+`host`, `service` and `level` outside a double-quoted string (for example
+`` |~ `$service` ``, `| x=$host`, `sum by ($service)`, a range `[$host]` or a
+`# $level` comment), and any explicit formatter there such as `|= "${host:raw}"`,
+fail with `unsupported <name> interpolation`. Default references inside
+double-quoted pipeline strings, such as `|~ "$host"`, remain supported. This
+only keeps a value inside its LogQL string. Stages that parse their string
+argument as another language (`pattern`, `regexp`, `json`/`logfmt` parameters,
+`line_format`/`label_format` templates) still read the escaped value in that
+language; for example, `lokiSpecialRegexEscape` leaves `<` and `>` unchanged for
+`pattern`. The escaping is regex escaping, so use the scoped filters only in
+regex matchers: `=~` selectors, `|~` line filters and `=~` label filters. In
+substring or equality filters such as `|= "$host"`, a value with regex
+punctuation arrives escaped and silently fails to match.
 Default Loki interpolation escapes regex backslashes a second time for a
 double-quoted LogQL string, preserving backticks, backslashes and regex
 punctuation as literal data. **Known upstream limitation:** the pinned Grafana
@@ -175,6 +191,16 @@ pairwise overlap checks, bounding those checks to at most 32,640 comparisons.
 Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
+Reference matching follows Grafana's variable pattern: ASCII names (as in
+JavaScript, so `$hostä` refers to `host`), `[[name:format]]` only with a word
+format, and `${name.fieldPath:format}` field paths, so these count for
+undefined-variable, dependency and interpolation checks too. Variable names must
+be ASCII. In target `expr` and variable `query` fields, every `${` must start such
+a reference with a field path and format of at most 128 characters each, and
+reference text cannot contain `"`, a backtick, `#`, `{`, `$`, `[`, `]` or a
+newline; otherwise the check fails with `unsupported variable reference syntax`.
+This keeps the checker's string and comment tokenization identical to what Loki
+sees after Grafana replaces each reference, and keeps matching linear in size.
 The supported globals are `__interval`, `__interval_ms`, `__range`, `__range_s`,
 `__range_ms`, `__auto`, `__from` and `__to`. They are reserved for built-in
 references; defining a query variable with one of these names fails with
