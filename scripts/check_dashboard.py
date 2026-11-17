@@ -1,6 +1,7 @@
 """Check the provisioned dashboard offline using only the standard library."""
 
 import argparse
+import bisect
 import json
 import math
 import os
@@ -26,10 +27,21 @@ BUILTINS = {
     "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
     "__auto", "__from", "__to",
 }
+# Grafana's variable syntax (TemplateSrv and Scenes VARIABLE_REGEX):
+#   \$(\w+)|\[\[(\w+?)(?::(\w+))?\]\]|\${(\w+)(?:\.([^:^\}]+))?(?::([^\}]+))?}
+# JavaScript \w is ASCII-only. At any position this pattern never consumes more
+# text than Grafana does, so it cannot hide a reference that Grafana sees inside
+# a longer match. Field paths and formats are bounded to keep matching linear;
+# check_reference_syntax refuses any "${" this pattern cannot match.
+MAX_REFERENCE_PART = 128
 VARIABLE = re.compile(
-    r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)(?::[^{}]+)?\})"
-    r"|\[\[([A-Za-z_]\w*)(?::[^\[\]]+)?\]\]"
+    r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)"
+    rf"(?:\.[^:^}}]{{1,{MAX_REFERENCE_PART}}})?(?::[^}}]{{1,{MAX_REFERENCE_PART}}})?\}})"
+    r"|\[\[([A-Za-z_]\w*)(?::\w+)?\]\]",
+    re.ASCII,
 )
+# Reference text that could change LogQL tokenization or nest another reference.
+REFERENCE_SYNTAX = re.compile(r'["`#{\n$\[\]]')
 # One stream matcher: label, operator, and a double-quoted or backtick string.
 MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^`]*`)\s*')
 ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
@@ -111,6 +123,23 @@ def without_query_comments(query):
             index += 1
         parts.append(query[start:index])
     return "".join(parts)
+
+
+def check_reference_syntax(query, context):
+    """Reference formats and field paths cannot hide LogQL string or comment syntax.
+
+    Grafana replaces each whole reference before Loki tokenizes the query; this
+    keeps the checker's string and comment tokenization the same either way.
+    """
+    for opening in re.finditer(r"\$\{", query):
+        require(VARIABLE.match(query, opening.start()),
+                context + ": unsupported variable reference syntax")
+    for reference in VARIABLE.finditer(query):
+        text = reference.group()
+        inner = (text[2:-2] if text.startswith("[[")
+                 else text[2:-1] if text.startswith("${") else text[1:])
+        require(not REFERENCE_SYNTAX.search(inner),
+                context + ": unsupported variable reference syntax")
 
 
 def variable_references(query, *, logql=False):
@@ -200,6 +229,55 @@ def selector_reference(name, quote=None):
     return rf'(?:\${name}|\$\{{{name}\}}|\[\[{name}\]\])'
 
 
+def double_quoted_spans(query):
+    """Sorted content spans of double-quoted LogQL strings outside # comments.
+
+    Grafana replaces every variable reference before Loki tokenizes the query,
+    so reference text (for example a quote inside a formatter) is masked here.
+    """
+    query = VARIABLE.sub(lambda match: "_" * len(match.group()), query)
+    spans = []
+    index = 0
+    while index < len(query):
+        char = query[index]
+        if char in '"`':
+            end = skip_string(query, index)
+            if char == '"':
+                spans.append((index + 1, end - 1))
+            index = end
+        elif char == "#":
+            end = query.find("\n", index)
+            index = len(query) if end == -1 else end + 1
+        else:
+            index += 1
+    return spans
+
+
+def check_scoped_interpolation(query, context):
+    """Scoped filter values are producer data wherever Grafana interpolates them.
+
+    Grafana applies the Loki formatter to the whole query text, so selectors,
+    pipeline stages, metric wrappers and comments all receive the value. Only
+    the default formatter inside a double-quoted string is a supported escaping
+    context; elsewhere (code, backtick strings, comments) a value can change
+    the LogQL structure.
+    """
+    spans = double_quoted_spans(query)
+    starts = [left for left, _ in spans]
+    for reference in VARIABLE.finditer(query):
+        name = next(group for group in reference.groups() if group is not None)
+        if name not in ("host", "service", "level"):
+            continue
+        start, end = reference.span()
+        # Spans are disjoint and sorted: only the last one starting at or
+        # before the reference can contain it.
+        candidate = bisect.bisect_right(starts, start) - 1
+        quoted = candidate >= 0 and end <= spans[candidate][1]
+        require(quoted and re.fullmatch(selector_reference(name), reference.group()),
+                context + f": unsupported {name} interpolation outside a double-quoted"
+                " default-format string")
+
+
 def require_scope_matchers(matchers, required, context):
     for label, (operator, value) in required.items():
         require(any(name == label and op == operator and re.fullmatch(value, content)
@@ -230,6 +308,8 @@ def check_variable_query_scope(variable, variable_names):
         for selector in selectors:
             selector_matchers(selector, context)
     if name not in ("host", "service", "level"):
+        if selectors:
+            check_scoped_interpolation(query, context)
         return
     # Raw text, as Grafana's migrateVariableQuery matches it: a LogQL comment in
     # or after the wrapper makes Grafana fall back to a label-names query.
@@ -248,6 +328,7 @@ def check_variable_query_scope(variable, variable_names):
     if name == "level":
         required["service"] = ("=~", selector_reference("service"))
     require_scope_matchers(selector_matchers(selectors[0], context), required, context)
+    check_scoped_interpolation(query, context)
 
 
 def check_target_scope(panel, target, variable_names):
@@ -275,6 +356,7 @@ def check_target_scope(panel, target, variable_names):
         if panel["title"] == "Log Volume by Level":
             require(all(name != "level" for name, _, _ in matchers),
                     context + ": volume must compare all levels")
+    check_scoped_interpolation(target["expr"], context)
 
 
 def validate_dashboard(dashboard):
@@ -293,7 +375,7 @@ def validate_dashboard(dashboard):
     for variable in variables:
         require(isinstance(variable, dict), "variable must be an object")
         name = variable.get("name")
-        require(isinstance(name, str) and re.fullmatch(r"[A-Za-z_]\w*", name),
+        require(isinstance(name, str) and re.fullmatch(r"[A-Za-z_]\w*", name, re.ASCII),
                 "variable needs a valid name")
         display_name = diagnostic_text(name)
         require(name not in BUILTINS, f"reserved variable name {display_name}")
@@ -336,6 +418,8 @@ def validate_dashboard(dashboard):
             require(name in names or name in BUILTINS, f"undefined variable {diagnostic_text(name)}")
 
     for variable in variables:
+        check_reference_syntax(variable["query"],
+                               f"variable {diagnostic_text(variable['name'])}: invalid query")
         check_references(variable["query"], logql=True)
 
     panel_ids = set()
@@ -386,6 +470,7 @@ def validate_dashboard(dashboard):
                         require(isinstance(target.get(key), str) and target[key].strip(),
                                 f"panel {panel_id}: missing target {key}")
                     query_fields.add((id(target), "expr"))
+                    check_reference_syntax(target["expr"], f"panel {panel_id}: invalid target")
                     check_references(target["expr"], logql=True)
                     ref_id = target["refId"]
                     require(ref_id not in ref_ids,

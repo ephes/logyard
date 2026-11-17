@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Apply the host/service/level interpolation policy to the whole query text:
+  pipeline stages, metric wrappers and comments in targets and selector-bearing
+  variable queries can no longer interpolate these filters raw, unquoted, in
+  backtick strings or with an explicit formatter. Match references like
+  Grafana does (ASCII names, word-only `[[name:format]]`, `${name.fieldPath:format}`),
+  require ASCII variable names, and refuse unparseable `${`, overlong reference
+  parts and quotes, backticks, `#`, `{`, `$`, brackets or newlines inside
+  reference text in queries.
+
 - Refuse additional query-variable interpolation in panel targets and
   selector-bearing dropdown queries until an escaping/All policy is supported;
   validate core-filter formatters in additional dropdown selectors too.
