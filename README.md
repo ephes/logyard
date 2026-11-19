@@ -188,6 +188,8 @@ level and are checked there. Leaf panels cannot store children.
 Dashboards may contain at most 256 panels in total, including all row headers
 and saved children in collapsed/nested rows. This budget is enforced before any
 pairwise overlap checks, bounding those checks to at most 32,640 comparisons.
+The checker formats panel IDs for the overlap diagnostic only when it finds
+the first colliding pair.
 Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.

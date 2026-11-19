@@ -505,8 +505,10 @@ def validate_dashboard(dashboard):
         for panel in siblings:
             x, y, w, h = (panel["gridPos"][key] for key in ("x", "y", "w", "h"))
             for other_id, left, top, right, bottom in rectangles:
-                require(not (x < right and left < x + w and y < bottom and top < y + h),
-                        f"panels {diagnostic_text(other_id)} and {diagnostic_text(panel['id'])} overlap")
+                if x < right and left < x + w and y < bottom and top < y + h:
+                    raise ValueError(
+                        f"panels {diagnostic_text(other_id)} and {diagnostic_text(panel['id'])} overlap"
+                    )
             rectangles.append((panel["id"], x, y, x + w, y + h))
 
     dependencies = {
