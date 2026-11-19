@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from scripts.check_dashboard import DEFAULT_PATH, main, validate_dashboard
+from scripts.check_dashboard import DEFAULT_PATH, diagnostic_text, main, validate_dashboard
 
 
 def row(children, collapsed=True):
@@ -434,15 +434,18 @@ class DashboardVariableGraphTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
 
-    def test_deep_tail_cycle_retains_stable_diagnostic(self):
-        dashboard = self.chain()
-        dashboard["templating"]["list"][-1]["query"] = "$v1098"
-        expected = "variable dependency cycle: " + " -> ".join(
-            [f"v{index:04}" for index in range(4)] + ["...", "v1098"]
-        )
-        with self.assertRaises(ValueError) as error:
-            validate_dashboard(dashboard)
-        self.assertEqual(str(error.exception), expected)
+    def test_cycle_diagnostic_shows_only_cycle_members(self):
+        for length, start, expected in (
+            (9, "v0007", "v0007 -> v0008 -> v0007"),
+            (13, "v0007", "v0007 -> v0008 -> v0009 -> v0010 -> ... -> v0007"),
+            (1100, "v1098", "v1098 -> v1099 -> v1098"),
+        ):
+            with self.subTest(length=length, start=start):
+                dashboard = self.chain(length)
+                dashboard["templating"]["list"][-1]["query"] = f"${start}"
+                with self.assertRaises(ValueError) as error:
+                    validate_dashboard(dashboard)
+                self.assertEqual(str(error.exception), f"variable dependency cycle: {expected}")
 
     def test_shared_subgraphs_are_not_cycles(self):
         dashboard = synthetic_dashboard()
@@ -788,6 +791,17 @@ class DashboardPanelBudgetTests(unittest.TestCase):
         with patch("scripts.check_dashboard.require", side_effect=observe):
             with self.assertRaisesRegex(ValueError, "panel count exceeds 256"):
                 validate_dashboard(dashboard)
+
+    def test_overlap_diagnostics_only_format_colliding_pairs(self):
+        dashboard = self.dashboard_with_panels(self.LIMIT)
+        with patch("scripts.check_dashboard.diagnostic_text", wraps=diagnostic_text) as format_text:
+            validate_dashboard(dashboard)
+        self.assertLessEqual(format_text.call_count, 2 * self.LIMIT)
+
+        panels = dashboard["panels"]
+        panels[-1]["gridPos"]["y"] = panels[-2]["gridPos"]["y"]
+        with self.assertRaisesRegex(ValueError, r"^panels 255 and 256 overlap$"):
+            validate_dashboard(dashboard)
 
     def test_panel_budget_boundary_includes_saved_nested_children(self):
         for nested in (False, True):

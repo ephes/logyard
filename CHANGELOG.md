@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show the actual variable dependency cycle in the bounded diagnostic, starting
+  at the repeated variable.
+- Format overlap diagnostics only for the first colliding pair of panels.
+
 - Apply the host/service/level interpolation policy to the whole query text:
   pipeline stages, metric wrappers and comments in targets and selector-bearing
   variable queries can no longer interpolate these filters raw, unquoted, in
