@@ -221,8 +221,9 @@ strings always count, even after a literal `#`. Titles, descriptions, variable m
 ordinary reference checking; they do not use LogQL comment rules.
 Dependency graphs are walked iteratively: long acyclic chains and shared
 dependencies are supported within the asset byte limit, independently of Python's
-recursion limit. Cycle diagnostics show the first four path entries and the closing dependency
-in stable name order, with `...` for omitted entries.
+recursion limit. Cycle diagnostics start at the repeated variable and show up
+to four cycle members in dependency order, followed by the closing reference
+to that variable. A `...` marks omitted cycle members.
 JSON nesting is limited to 64 container levels, including extension objects and
 saved rows: the dashboard root object is level 1, each nested object or array adds
 one level, and scalar values add none. Excessive nesting during decoding or

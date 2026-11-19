@@ -532,8 +532,11 @@ def validate_dashboard(dashboard):
                 active.remove(current)
                 visited.add(current)
             elif dependency in active:
-                path = [diagnostic_text(entry[0]) for entry in stack[:4]]
-                if len(stack) > 4:
+                cycle_start = next(index for index, (name, _) in enumerate(stack)
+                                   if name == dependency)
+                preview_end = cycle_start + 4
+                path = [diagnostic_text(name) for name, _ in stack[cycle_start:preview_end]]
+                if len(stack) > preview_end:
                     path.append("...")
                 path.append(diagnostic_text(dependency))
                 raise ValueError("variable dependency cycle: " + " -> ".join(path))

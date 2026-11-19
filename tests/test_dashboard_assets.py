@@ -434,15 +434,18 @@ class DashboardVariableGraphTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
 
-    def test_deep_tail_cycle_retains_stable_diagnostic(self):
-        dashboard = self.chain()
-        dashboard["templating"]["list"][-1]["query"] = "$v1098"
-        expected = "variable dependency cycle: " + " -> ".join(
-            [f"v{index:04}" for index in range(4)] + ["...", "v1098"]
-        )
-        with self.assertRaises(ValueError) as error:
-            validate_dashboard(dashboard)
-        self.assertEqual(str(error.exception), expected)
+    def test_cycle_diagnostic_shows_only_cycle_members(self):
+        for length, start, expected in (
+            (9, "v0007", "v0007 -> v0008 -> v0007"),
+            (13, "v0007", "v0007 -> v0008 -> v0009 -> v0010 -> ... -> v0007"),
+            (1100, "v1098", "v1098 -> v1099 -> v1098"),
+        ):
+            with self.subTest(length=length, start=start):
+                dashboard = self.chain(length)
+                dashboard["templating"]["list"][-1]["query"] = f"${start}"
+                with self.assertRaises(ValueError) as error:
+                    validate_dashboard(dashboard)
+                self.assertEqual(str(error.exception), f"variable dependency cycle: {expected}")
 
     def test_shared_subgraphs_are_not_cycles(self):
         dashboard = synthetic_dashboard()
