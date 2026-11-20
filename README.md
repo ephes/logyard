@@ -109,6 +109,9 @@ Hidden helper targets follow the same mode contract as visible targets.
 The checker and query regressions inspect every target, including hidden helpers
 and targets saved inside rows, regardless of target order. Every selector must
 contain `source_type="journald"`, `host=~"$host"` and `service=~"$service"`.
+Each required scope label must appear exactly once per selector in panel targets
+and the three filter dropdown queries, even if a repeated matcher is identical.
+Other labels can combine multiple matchers subject to the existing selector rules.
 Ordinary panels also require `level=~"$level"`. Only the two named error panels
 use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
 matchers to compare all levels. These exceptions cannot reference `$level`.

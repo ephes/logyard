@@ -281,9 +281,14 @@ def check_scoped_interpolation(query, context):
 
 
 def require_scope_matchers(matchers, required, context):
+    scoped = {}
+    for label, operator, content in matchers:
+        if label in required:
+            require(label not in scoped, context + f": repeated {label} matcher")
+            scoped[label] = (operator, content)
     for label, (operator, value) in required.items():
-        require(any(name == label and op == operator and re.fullmatch(value, content)
-                    for name, op, content in matchers),
+        actual_operator, content = scoped.get(label, (None, ""))
+        require(actual_operator == operator and re.fullmatch(value, content),
                 context + f": expected {label} filter")
 
 
