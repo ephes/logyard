@@ -2,6 +2,7 @@
 
 import argparse
 import bisect
+from itertools import pairwise
 import json
 import math
 import os
@@ -18,6 +19,7 @@ DEFAULT_PATH = (
 MAX_NESTING = 64
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
+GRID_COLUMNS = 24
 MAX_VARIABLES = 256
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
@@ -503,8 +505,8 @@ def validate_dashboard(dashboard):
                 type(grid.get(key)) is int for key in ("x", "y", "w", "h")
             ), f"panel {panel_id}: gridPos needs integer x, y, w, h")
             x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
-            require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= 24,
-                    f"panel {panel_id}: gridPos must fit the 24-column grid")
+            require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= GRID_COLUMNS,
+                    f"panel {panel_id}: gridPos must fit the {GRID_COLUMNS}-column grid")
             if panel_type not in ("text", "row"):
                 require(panel.get("datasource") == LOKI,
                         f"panel {panel_id}: expected Loki datasource {LOKI}")
@@ -552,15 +554,23 @@ def validate_dashboard(dashboard):
     # budget. Saved children occupy their own grid, separate from their header
     # and visible panels; expanded row children already live at the top level.
     for siblings in layout_scopes:
-        rectangles = []
-        for panel in siblings:
+        columns = [[] for _ in range(GRID_COLUMNS)]
+        for index, panel in enumerate(siblings):
             x, y, w, h = (panel["gridPos"][key] for key in ("x", "y", "w", "h"))
-            for other_id, left, top, right, bottom in rectangles:
-                if x < right and left < x + w and y < bottom and top < y + h:
+            interval = (y, y + h, index)
+            for column in range(x, x + w):
+                columns[column].append(interval)
+        for intervals in columns:
+            intervals.sort(key=lambda interval: interval[0])
+            # With positive heights, any overlap implies an overlapping
+            # adjacent pair in top-edge order.
+            for (_, bottom, previous_index), (top, _, index) in pairwise(intervals):
+                if top < bottom:
+                    first, second = sorted((previous_index, index))
                     raise ValueError(
-                        f"panels {diagnostic_text(other_id)} and {diagnostic_text(panel['id'])} overlap"
+                        f"panels {diagnostic_text(siblings[first]['id'])} "
+                        f"and {diagnostic_text(siblings[second]['id'])} overlap"
                     )
-            rectangles.append((panel["id"], x, y, x + w, y + h))
 
     dependencies = {
         # Grafana finds dependencies in the whole query text, comments included.

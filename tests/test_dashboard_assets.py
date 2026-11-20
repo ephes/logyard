@@ -930,6 +930,27 @@ class DashboardPanelBudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"^panels 255 and 256 overlap$"):
             validate_dashboard(dashboard)
 
+    def test_tall_single_column_layout_limits_comparisons(self):
+        comparisons = 0
+
+        class MeasuredY(int):
+            def __lt__(self, other):
+                nonlocal comparisons
+                comparisons += 1
+                return super().__lt__(other)
+
+        class MeasuredGrid(dict):
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                # Shape validation via dict.get still sees the original int.
+                return MeasuredY(value) if key == "y" else value
+
+        dashboard = self.dashboard_with_panels(self.LIMIT)
+        for panel in dashboard["panels"]:
+            panel["gridPos"] = MeasuredGrid(panel["gridPos"])
+        validate_dashboard(dashboard)
+        self.assertLessEqual(comparisons, 3 * self.LIMIT)
+
     def test_panel_budget_boundary_includes_saved_nested_children(self):
         for nested in (False, True):
             for count in (self.LIMIT, self.LIMIT + 1):
@@ -1102,6 +1123,18 @@ class DashboardChildGridTests(unittest.TestCase):
                 children[1]["gridPos"].update(x=x, y=y)
                 dashboard["panels"] = [row(children)]
                 validate_dashboard(dashboard)
+
+    def test_saved_siblings_use_grid_columns_and_report_ids_in_sibling_order(self):
+        dashboard = synthetic_dashboard()
+        lower, upper = self.query_children()
+        lower["gridPos"].update(x=23, y=4, w=1)
+        upper["gridPos"].update(x=22, y=0, w=2)
+        dashboard["panels"] = [row([lower, upper])]
+        validate_dashboard(dashboard)
+
+        lower["gridPos"]["y"] = 3
+        with self.assertRaisesRegex(ValueError, r"^panels 100 and 101 overlap$"):
+            validate_dashboard(dashboard)
 
     def test_saved_siblings_are_scoped_to_their_own_row(self):
         dashboard = synthetic_dashboard()
