@@ -74,12 +74,16 @@ identical values and escaped spellings of the same key. Inputs must be standard
 JSON: `NaN`, `Infinity`, `-Infinity` and numbers that overflow to infinity
 are rejected, including in extension/annotation options and when calling the
 validator directly. Finite numeric values and strings containing these words
-remain supported. Inputs must be UTF-8
-regular files of at most 1 MiB (1,048,576 bytes), inclusive. Symlinks to regular
-files are supported. The checker opens the path once, nonblocking where supported,
-checks the descriptor's type and size before reading, and reads at most the byte
-limit plus one byte to detect growth after the size check. Nonregular files,
-oversized assets and invalid UTF-8 fail with exit 1 and a concise diagnostic.
+remain supported. JSON object keys and string values must consist of Unicode
+scalar values, including in extensions and annotations. An unpaired surrogate
+escape fails with the fixed diagnostic `dashboard text contains a Unicode
+surrogate`. Paired escapes for supplementary characters are accepted. Inputs
+must be UTF-8 regular files of at most 1 MiB (1,048,576 bytes), inclusive.
+Symlinks to regular files are supported. The checker opens the path once,
+nonblocking where supported, checks the descriptor's type and size before
+reading, and reads at most the byte limit plus one byte to detect growth
+after the size check. Nonregular files, oversized assets and invalid UTF-8
+fail with exit 1 and a concise diagnostic.
 After reading, the checker compares the same descriptor's device, inode, size,
 nanosecond modification time and change time, and requires the consumed byte
 count to equal its initial size. Detected changes fail with `dashboard changed

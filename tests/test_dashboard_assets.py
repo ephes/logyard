@@ -617,6 +617,30 @@ class DashboardAdmissionTests(unittest.TestCase):
     def test_cli_rejects_invalid_utf8(self):
         self.assert_invalid(self.run_cli(b"\xff"), "utf-8")
 
+    def test_rejects_lone_surrogates_in_extension_keys_and_values(self):
+        diagnostic = "dashboard text contains a Unicode surrogate"
+        for surrogate in ("\ud800", "\udfff"):
+            text = f"extension{surrogate}text"
+            for extension in ({text: None}, {"value": [text]}):
+                dashboard = synthetic_dashboard()
+                dashboard["extension"] = extension
+                with self.subTest(extension=extension, entry="CLI"):
+                    result = self.run_cli(json.dumps(dashboard, ensure_ascii=True).encode("ascii"))
+                    self.assert_invalid(result, diagnostic)
+                    self.assertTrue(result.stderr.endswith(f": {diagnostic}\n"), result.stderr)
+                with self.subTest(extension=extension, entry="validator"):
+                    with self.assertRaisesRegex(ValueError, f"^{diagnostic}$"):
+                        validate_dashboard(dashboard)
+
+    def test_cli_accepts_paired_surrogate_escapes_in_keys_and_values(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"\U0001f642": ["\U0001f642"]}
+        content = json.dumps(dashboard, ensure_ascii=True).encode("ascii")
+        self.assertEqual(content.count(br"\ud83d\ude42"), 2)
+        result = self.run_cli(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+
     def test_nonregular_files_are_rejected_before_reading(self):
         # Synthetic metadata avoids platform-specific devices, FIFOs or sockets.
         with tempfile.TemporaryDirectory() as directory:
