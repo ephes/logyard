@@ -355,9 +355,7 @@ class DashboardAssetTests(unittest.TestCase):
             for content in ("{", "[]", json.dumps(invalid)):
                 path.write_text(content, encoding="utf-8")
                 result = subprocess.run(
-                    [sys.executable, "-c",
-                 "import sys; from scripts.check_dashboard import main; "
-                 "sys.setrecursionlimit(128); sys.exit(main())", str(path)],
+                    [sys.executable, "-m", "scripts.check_dashboard", str(path)],
                     cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True,
                 )
                 with self.subTest(content=content[:20]):
@@ -441,8 +439,12 @@ class DashboardVariableGraphTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.json"
             path.write_bytes(content)
+            # The chain is longer than this recursion limit, so the dependency
+            # walk must stay iterative.
             result = subprocess.run(
-                [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                [sys.executable, "-c",
+                 "import sys; from scripts.check_dashboard import main; "
+                 "sys.setrecursionlimit(128); sys.exit(main())", str(path)],
                 cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True, timeout=5,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
