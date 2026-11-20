@@ -219,19 +219,22 @@ def selector_matchers(selector, context):
     position = 0
     while True:
         match = MATCHER.match(selector, position)
-        require(match, context + ": unparseable selector")
+        if not match:
+            raise ValueError(context + ": unparseable selector")
         label, operator, literal = match.groups()
         content = literal[1:-1]
         for reference in VARIABLE.finditer(content):
             name = next(group for group in reference.groups() if group is not None)
-            if name in ("host", "service", "level"):
-                require(re.fullmatch(selector_reference(name, literal[0]), reference.group()),
-                        context + f": unsupported {name} selector formatter")
+            if name in ("host", "service", "level") and not re.fullmatch(
+                selector_reference(name, literal[0]), reference.group()
+            ):
+                raise ValueError(context + f": unsupported {name} selector formatter")
         matchers.append((label, operator, content))
         position = match.end()
         if position == len(selector):
             return matchers
-        require(selector[position] == ",", context + ": unparseable selector")
+        if selector[position] != ",":
+            raise ValueError(context + ": unparseable selector")
         position += 1
 
 
@@ -290,21 +293,22 @@ def check_scoped_interpolation(query, context):
         # before the reference can contain it.
         candidate = bisect.bisect_right(starts, start) - 1
         quoted = candidate >= 0 and end <= spans[candidate][1]
-        require(quoted and re.fullmatch(selector_reference(name), reference.group()),
-                context + f": unsupported {name} interpolation outside a double-quoted"
-                " default-format string")
+        if not quoted or not re.fullmatch(selector_reference(name), reference.group()):
+            raise ValueError(context + f": unsupported {name} interpolation outside a double-quoted"
+                             " default-format string")
 
 
 def require_scope_matchers(matchers, required, context):
     scoped = {}
     for label, operator, content in matchers:
         if label in required:
-            require(label not in scoped, context + f": repeated {label} matcher")
+            if label in scoped:
+                raise ValueError(context + f": repeated {label} matcher")
             scoped[label] = (operator, content)
     for label, (operator, value) in required.items():
         actual_operator, content = scoped.get(label, (None, ""))
-        require(actual_operator == operator and re.fullmatch(value, content),
-                context + f": expected {label} filter")
+        if actual_operator != operator or not re.fullmatch(value, content):
+            raise ValueError(context + f": expected {label} filter")
 
 
 def check_executable_variables(query, context, variable_names):
@@ -336,14 +340,16 @@ def check_variable_query_scope(variable, variable_names):
     # Raw text, as Grafana's migrateVariableQuery matches it: a LogQL comment in
     # or after the wrapper makes Grafana fall back to a label-names query.
     prefix = re.match(r'\s*label_values\s*\(\s*', query)
-    require(prefix, context + ": expected label_values(selector, label)")
-    require(len(selectors) == 1, context + ": expected one selector")
+    if not prefix:
+        raise ValueError(context + ": expected label_values(selector, label)")
+    if len(selectors) != 1:
+        raise ValueError(context + ": expected one selector")
     selector = "{" + selectors[0] + "}"
-    require(query.startswith(selector, prefix.end()),
-            context + ": expected selector argument")
+    if not query.startswith(selector, prefix.end()):
+        raise ValueError(context + ": expected selector argument")
     suffix = query[prefix.end() + len(selector):]
-    require(re.fullmatch(rf'\s*,\s*{name}\s*\)\s*', suffix),
-            context + f": expected returned label {diagnostic_text(name)}")
+    if not re.fullmatch(rf'\s*,\s*{name}\s*\)\s*', suffix):
+        raise ValueError(context + f": expected returned label {diagnostic_text(name)}")
     required = {"source_type": ("=", r"journald")}
     if name in ("service", "level"):
         required["host"] = ("=~", selector_reference("host"))
@@ -359,7 +365,8 @@ def check_target_scope(panel, target, variable_names):
                f"target {diagnostic_text(target['refId'])}: invalid query scope")
     check_executable_variables(target["expr"], context, variable_names)
     selectors = stream_selectors(target["expr"])
-    require(selectors, context + ": missing selector")
+    if not selectors:
+        raise ValueError(context + ": missing selector")
     required = {"source_type": ("=", r"journald")}
     for label in ("host", "service", "level"):
         required[label] = ("=~", selector_reference(label))
@@ -370,14 +377,13 @@ def check_target_scope(panel, target, variable_names):
     if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
         # Grafana interpolates $level in comments too; a value with a newline
         # would end the comment, so comment references count here.
-        require("level" not in variable_references(target["expr"]),
-                context + ": unexpected level variable")
+        if "level" in variable_references(target["expr"]):
+            raise ValueError(context + ": unexpected level variable")
     for selector in selectors:
         matchers = selector_matchers(selector, context)
         require_scope_matchers(matchers, required, context)
-        if panel["title"] == "Log Volume by Level":
-            require(all(name != "level" for name, _, _ in matchers),
-                    context + ": volume must compare all levels")
+        if panel["title"] == "Log Volume by Level" and any(name == "level" for name, _, _ in matchers):
+            raise ValueError(context + ": volume must compare all levels")
     check_scoped_interpolation(target["expr"], context)
 
 

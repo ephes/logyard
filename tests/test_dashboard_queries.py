@@ -1,13 +1,15 @@
 """Offline selector contracts; no Loki or Grafana instance is needed."""
 
+from collections import Counter
 import copy
 import json
 from pathlib import Path
 import re
 import unittest
+from unittest.mock import patch
 
 from scripts.check_dashboard import (
-    check_scoped_interpolation, selector_matchers, stream_selectors, validate_dashboard,
+    check_scoped_interpolation, require, selector_matchers, stream_selectors, validate_dashboard,
 )
 
 
@@ -398,6 +400,46 @@ class DashboardExtraVariableTests(unittest.TestCase):
 
 
 class DashboardTargetScopeTests(unittest.TestCase):
+    def test_valid_matchers_do_not_build_scope_diagnostics(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        extra_matchers = 'environment=~"prod|staging", environment!="staging", ' * 64
+        for _, target in query_targets(dashboard["panels"]):
+            target["expr"] = target["expr"].replace("{", "{" + extra_matchers, 1)
+        for variable in dashboard["templating"]["list"]:
+            variable["query"] = variable["query"].replace("{", "{" + extra_matchers, 1)
+
+        diagnostics = Counter()
+
+        def observe(condition, message):
+            _, separator, detail = message.partition(": invalid query scope: ")
+            if separator:
+                diagnostics[detail] += 1
+            require(condition, message)
+
+        with patch("scripts.check_dashboard.require", side_effect=observe):
+            validate_dashboard(dashboard)
+        self.assertEqual(diagnostics, {})
+
+    def test_scope_errors_keep_target_and_label_context(self):
+        for clause, message in (
+            ('host=~$host', "unparseable selector"),
+            ('host=~"$host" service=~"$service"', "unparseable selector"),
+            ('host=~"${host:raw}"', "unsupported host selector formatter"),
+            ('host=~"$host", host=~"$host"', "repeated host matcher"),
+            ('host="fixed"', "expected host filter"),
+        ):
+            with self.subTest(clause=clause):
+                dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+                panel = dashboard["panels"][1]
+                target = panel["targets"][0]
+                target["expr"] = target["expr"].replace('host=~"$host"', clause)
+                with self.assertRaises(ValueError) as failure:
+                    validate_dashboard(dashboard)
+                self.assertEqual(
+                    str(failure.exception),
+                    f"panel {panel['id']}: target {target['refId']}: invalid query scope: {message}",
+                )
+
     def test_selector_variable_formatters_are_allowlisted(self):
         source = json.loads(DASHBOARD.read_text(encoding="utf-8"))
         for index, panel in enumerate(source["panels"]):

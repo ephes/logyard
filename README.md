@@ -151,6 +151,7 @@ string literals is split into whole `label op "value"` (or backtick) matchers,
 so text inside a quoted or backtick string never counts as a matcher, and
 pipeline templates such as `line_format "{{.message}}"` are not selectors.
 A `#` line comment ends at its newline; quotes and braces inside it are ignored.
+The checker builds selector and scope error messages only when a check fails.
 This is a focused contract for this asset's selectors, not a general LogQL
 parser or execution check.
 The three filter dropdown queries must each be a single
