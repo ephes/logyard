@@ -74,12 +74,16 @@ identical values and escaped spellings of the same key. Inputs must be standard
 JSON: `NaN`, `Infinity`, `-Infinity` and numbers that overflow to infinity
 are rejected, including in extension/annotation options and when calling the
 validator directly. Finite numeric values and strings containing these words
-remain supported. Inputs must be UTF-8
-regular files of at most 1 MiB (1,048,576 bytes), inclusive. Symlinks to regular
-files are supported. The checker opens the path once, nonblocking where supported,
-checks the descriptor's type and size before reading, and reads at most the byte
-limit plus one byte to detect growth after the size check. Nonregular files,
-oversized assets and invalid UTF-8 fail with exit 1 and a concise diagnostic.
+remain supported. JSON object keys and string values must consist of Unicode
+scalar values, including in extensions and annotations. An unpaired surrogate
+escape fails with the fixed diagnostic `dashboard text contains a Unicode
+surrogate`. Paired escapes for supplementary characters are accepted. Inputs
+must be UTF-8 regular files of at most 1 MiB (1,048,576 bytes), inclusive.
+Symlinks to regular files are supported. The checker opens the path once,
+nonblocking where supported, checks the descriptor's type and size before
+reading, and reads at most the byte limit plus one byte to detect growth
+after the size check. Nonregular files, oversized assets and invalid UTF-8
+fail with exit 1 and a concise diagnostic.
 After reading, the checker compares the same descriptor's device, inode, size,
 nanosecond modification time and change time, and requires the consumed byte
 count to equal its initial size. Detected changes fail with `dashboard changed
@@ -190,6 +194,9 @@ and saved children in collapsed/nested rows. This budget is enforced before any
 pairwise overlap checks, bounding those checks to at most 32,640 comparisons.
 The checker formats panel IDs for the overlap diagnostic only when it finds
 the first colliding pair.
+Dashboards may contain at most 256 variables in total, including the three
+required dropdowns. The checker enforces this budget before inspecting any
+query text or building the variable dependency graph.
 Grafana's built-in annotation datasource is separate from
 the Loki query datasource. The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
@@ -220,8 +227,8 @@ then fall back to a label-names query. References inside double-quoted or backti
 strings always count, even after a literal `#`. Titles, descriptions, variable metadata and other strings keep
 ordinary reference checking; they do not use LogQL comment rules.
 Dependency graphs are walked iteratively: long acyclic chains and shared
-dependencies are supported within the asset byte limit, independently of Python's
-recursion limit. Cycle diagnostics start at the repeated variable and show up
+dependencies are supported within the variable and asset byte limits,
+independently of Python's recursion limit. Cycle diagnostics start at the repeated variable and show up
 to four cycle members in dependency order, followed by the closing reference
 to that variable. A `...` marks omitted cycle members.
 JSON nesting is limited to 64 container levels, including extension objects and

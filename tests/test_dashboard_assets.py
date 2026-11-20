@@ -383,6 +383,7 @@ def synthetic_dashboard():
 
 
 class DashboardVariableGraphTests(unittest.TestCase):
+    LIMIT = 256
     BUILTIN_NAMES = (
         "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
         "__auto", "__from", "__to",
@@ -410,7 +411,7 @@ class DashboardVariableGraphTests(unittest.TestCase):
                 ))
                 validate_dashboard(dashboard)
 
-    def chain(self, length=1100):
+    def chain(self, length):
         dashboard = synthetic_dashboard()
         dashboard["templating"]["list"].extend(
             dict(name=f"v{index:04}", type="query",
@@ -420,15 +421,30 @@ class DashboardVariableGraphTests(unittest.TestCase):
         )
         return dashboard
 
-    def test_long_acyclic_chain_is_valid_shallow_json(self):
-        dashboard = self.chain()
+    def test_variable_budget_precedes_query_scanning(self):
+        dashboard = self.chain(2000)
+        self.assertLess(len(json.dumps(dashboard).encode("utf-8")), 1024 * 1024)
+        for scanner in ("check_reference_syntax", "variable_references"):
+            with self.subTest(scanner=scanner), patch(
+                f"scripts.check_dashboard.{scanner}",
+                side_effect=AssertionError("query scanning began before admission"),
+            ):
+                with self.assertRaisesRegex(ValueError, r"^variable count exceeds 256$"):
+                    validate_dashboard(dashboard)
+
+    def test_long_acyclic_chain_is_valid_shallow_json_at_variable_limit(self):
+        dashboard = self.chain(self.LIMIT - 3)  # The required dropdowns count too.
         content = json.dumps(dashboard).encode("utf-8")
         self.assertLess(len(content), 1024 * 1024)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.json"
             path.write_bytes(content)
+            # The chain is longer than this recursion limit, so the dependency
+            # walk must stay iterative.
             result = subprocess.run(
-                [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                [sys.executable, "-c",
+                 "import sys; from scripts.check_dashboard import main; "
+                 "sys.setrecursionlimit(128); sys.exit(main())", str(path)],
                 cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True, timeout=5,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -438,7 +454,7 @@ class DashboardVariableGraphTests(unittest.TestCase):
         for length, start, expected in (
             (9, "v0007", "v0007 -> v0008 -> v0007"),
             (13, "v0007", "v0007 -> v0008 -> v0009 -> v0010 -> ... -> v0007"),
-            (1100, "v1098", "v1098 -> v1099 -> v1098"),
+            (253, "v0251", "v0251 -> v0252 -> v0251"),
         ):
             with self.subTest(length=length, start=start):
                 dashboard = self.chain(length)
@@ -602,6 +618,30 @@ class DashboardAdmissionTests(unittest.TestCase):
 
     def test_cli_rejects_invalid_utf8(self):
         self.assert_invalid(self.run_cli(b"\xff"), "utf-8")
+
+    def test_rejects_lone_surrogates_in_extension_keys_and_values(self):
+        diagnostic = "dashboard text contains a Unicode surrogate"
+        for surrogate in ("\ud800", "\udfff"):
+            text = f"extension{surrogate}text"
+            for extension in ({text: None}, {"value": [text]}):
+                dashboard = synthetic_dashboard()
+                dashboard["extension"] = extension
+                with self.subTest(extension=extension, entry="CLI"):
+                    result = self.run_cli(json.dumps(dashboard, ensure_ascii=True).encode("ascii"))
+                    self.assert_invalid(result, diagnostic)
+                    self.assertTrue(result.stderr.endswith(f": {diagnostic}\n"), result.stderr)
+                with self.subTest(extension=extension, entry="validator"):
+                    with self.assertRaisesRegex(ValueError, f"^{diagnostic}$"):
+                        validate_dashboard(dashboard)
+
+    def test_cli_accepts_paired_surrogate_escapes_in_keys_and_values(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"\U0001f642": ["\U0001f642"]}
+        content = json.dumps(dashboard, ensure_ascii=True).encode("ascii")
+        self.assertEqual(content.count(br"\ud83d\ude42"), 2)
+        result = self.run_cli(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
 
     def test_nonregular_files_are_rejected_before_reading(self):
         # Synthetic metadata avoids platform-specific devices, FIFOs or sockets.

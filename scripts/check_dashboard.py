@@ -18,6 +18,7 @@ DEFAULT_PATH = (
 MAX_NESTING = 64
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
+MAX_VARIABLES = 256
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
 QUERY_MODES = {"stat": "instant", "bargauge": "instant",
@@ -45,6 +46,7 @@ REFERENCE_SYNTAX = re.compile(r'["`#{\n$\[\]]')
 # One stream matcher: label, operator, and a double-quoted or backtick string.
 MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^`]*`)\s*')
 ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
+SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
 def diagnostic_text(value, limit=128):
@@ -371,6 +373,7 @@ def validate_dashboard(dashboard):
     require(isinstance(templating, dict), "templating must be an object")
     variables = templating.get("list")
     require(isinstance(variables, list), "templating.list must be a list")
+    require(len(variables) <= MAX_VARIABLES, f"variable count exceeds {MAX_VARIABLES}")
     names = set()
     for variable in variables:
         require(isinstance(variable, dict), "variable must be an object")
@@ -396,11 +399,14 @@ def validate_dashboard(dashboard):
                     f"{display_name}: allValue must be empty or exactly .*")
     require({"host", "service", "level"} <= names, "host, service and level variables are required")
 
-    # Bound every container, including extensions, before recursive panel checks.
+    # Check JSON depth and scalars, including extensions, before recursive panel checks.
     strings = []
     pending = [(dashboard, 1, None, None)]
     while pending:
         value, depth, owner, key = pending.pop()
+        if ((isinstance(key, str) and SURROGATE.search(key))
+                or (isinstance(value, str) and SURROGATE.search(value))):
+            raise ValueError("dashboard text contains a Unicode surrogate")
         if isinstance(value, (dict, list)):
             require(depth <= MAX_NESTING,
                     f"dashboard nesting exceeds {MAX_NESTING} container levels")
