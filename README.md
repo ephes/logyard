@@ -100,8 +100,9 @@ panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
 Different panels may reuse a target `refId`. Each query panel must have at least
 one visible target: `hide` must be a boolean when present and defaults to false
-when omitted. Hidden helper targets are allowed alongside a visible target;
-text and row panels do not need targets. These checks also apply inside rows.
+when omitted. Hidden helper targets are allowed alongside a visible target.
+Text panels do not need targets. Row headers may omit `targets` or use an
+empty list. Put query targets on data panels, including saved children of rows.
 Every target must explicitly set `queryType` to `instant` or `range`. Stat and
 bar-gauge panels require `instant`; logs and time-series panels require `range`.
 Hidden helper targets follow the same mode contract as visible targets.

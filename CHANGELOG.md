@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reject nonempty target lists on row headers, including nested rows.
 - Reject unpaired Unicode surrogate escapes in dashboard JSON keys and values.
 - Refuse dashboards with more than 256 variables before scanning query text.
 - Show the actual variable dependency cycle in the bounded diagnostic, starting
