@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refuse dashboards with more than 256 variables before scanning query text.
 - Show the actual variable dependency cycle in the bounded diagnostic, starting
   at the repeated variable.
 - Format overlap diagnostics only for the first colliding pair of panels.

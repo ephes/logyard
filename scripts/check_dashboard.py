@@ -18,6 +18,7 @@ DEFAULT_PATH = (
 MAX_NESTING = 64
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
+MAX_VARIABLES = 256
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
 QUERY_MODES = {"stat": "instant", "bargauge": "instant",
@@ -371,6 +372,7 @@ def validate_dashboard(dashboard):
     require(isinstance(templating, dict), "templating must be an object")
     variables = templating.get("list")
     require(isinstance(variables, list), "templating.list must be a list")
+    require(len(variables) <= MAX_VARIABLES, f"variable count exceeds {MAX_VARIABLES}")
     names = set()
     for variable in variables:
         require(isinstance(variable, dict), "variable must be an object")

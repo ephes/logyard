@@ -355,7 +355,9 @@ class DashboardAssetTests(unittest.TestCase):
             for content in ("{", "[]", json.dumps(invalid)):
                 path.write_text(content, encoding="utf-8")
                 result = subprocess.run(
-                    [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                    [sys.executable, "-c",
+                 "import sys; from scripts.check_dashboard import main; "
+                 "sys.setrecursionlimit(128); sys.exit(main())", str(path)],
                     cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True,
                 )
                 with self.subTest(content=content[:20]):
@@ -383,6 +385,7 @@ def synthetic_dashboard():
 
 
 class DashboardVariableGraphTests(unittest.TestCase):
+    LIMIT = 256
     BUILTIN_NAMES = (
         "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
         "__auto", "__from", "__to",
@@ -410,7 +413,7 @@ class DashboardVariableGraphTests(unittest.TestCase):
                 ))
                 validate_dashboard(dashboard)
 
-    def chain(self, length=1100):
+    def chain(self, length):
         dashboard = synthetic_dashboard()
         dashboard["templating"]["list"].extend(
             dict(name=f"v{index:04}", type="query",
@@ -420,8 +423,19 @@ class DashboardVariableGraphTests(unittest.TestCase):
         )
         return dashboard
 
-    def test_long_acyclic_chain_is_valid_shallow_json(self):
-        dashboard = self.chain()
+    def test_variable_budget_precedes_query_scanning(self):
+        dashboard = self.chain(2000)
+        self.assertLess(len(json.dumps(dashboard).encode("utf-8")), 1024 * 1024)
+        for scanner in ("check_reference_syntax", "variable_references"):
+            with self.subTest(scanner=scanner), patch(
+                f"scripts.check_dashboard.{scanner}",
+                side_effect=AssertionError("query scanning began before admission"),
+            ):
+                with self.assertRaisesRegex(ValueError, r"^variable count exceeds 256$"):
+                    validate_dashboard(dashboard)
+
+    def test_long_acyclic_chain_is_valid_shallow_json_at_variable_limit(self):
+        dashboard = self.chain(self.LIMIT - 3)  # The required dropdowns count too.
         content = json.dumps(dashboard).encode("utf-8")
         self.assertLess(len(content), 1024 * 1024)
         with tempfile.TemporaryDirectory() as directory:
@@ -438,7 +452,7 @@ class DashboardVariableGraphTests(unittest.TestCase):
         for length, start, expected in (
             (9, "v0007", "v0007 -> v0008 -> v0007"),
             (13, "v0007", "v0007 -> v0008 -> v0009 -> v0010 -> ... -> v0007"),
-            (1100, "v1098", "v1098 -> v1099 -> v1098"),
+            (253, "v0251", "v0251 -> v0252 -> v0251"),
         ):
             with self.subTest(length=length, start=start):
                 dashboard = self.chain(length)
