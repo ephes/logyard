@@ -478,11 +478,13 @@ def validate_dashboard(dashboard):
             for key in ("title", "type"):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
-            if panel["type"] == "row":
+            panel_type = panel["type"]
+            if panel_type == "row":
                 require(type(panel.get("collapsed")) is bool,
                         f"panel {panel_id}: row collapsed must be a boolean")
+            if panel_type in ("text", "row"):
                 require(panel.get("targets", []) == [],
-                        f"panel {panel_id}: row must not declare targets")
+                        f"panel {panel_id}: {panel_type} must not declare targets")
             if "panels" in panel:
                 require(panel["type"] == "row",
                         f"panel {panel_id}: only rows may store children")
@@ -496,7 +498,7 @@ def validate_dashboard(dashboard):
             x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
             require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= 24,
                     f"panel {panel_id}: gridPos must fit the 24-column grid")
-            if panel["type"] not in ("text", "row"):
+            if panel_type not in ("text", "row"):
                 require(panel.get("datasource") == LOKI,
                         f"panel {panel_id}: expected Loki datasource {LOKI}")
                 targets = panel.get("targets")
