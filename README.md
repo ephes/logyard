@@ -195,7 +195,8 @@ edges are allowed. Each nested row has its own saved layout, so its children may
 share coordinates with panels outside that row, including visible panels.
 Every row must have a boolean `collapsed` flag. Only rows may have a `panels`
 list; an expanded row may have an empty list, but its children live at the top
-level and are checked there. Leaf panels cannot store children.
+level and are checked there. Empty child lists are skipped during overlap
+validation. Leaf panels cannot store children.
 Dashboards may contain at most 256 panels in total, including all row headers
 and saved children in collapsed/nested rows. This budget is enforced before any
 pairwise overlap checks, bounding those checks to at most 32,640 comparisons.

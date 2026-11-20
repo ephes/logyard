@@ -471,7 +471,8 @@ def validate_dashboard(dashboard):
 
     def check_panels(panels):
         require(isinstance(panels, list), "panels must be a list")
-        layout_scopes.append(panels)
+        if panels:
+            layout_scopes.append(panels)
         for panel_index, panel in enumerate(panels):
             require(isinstance(panel, dict), "panel must be an object")
             panel_id = panel.get("id")

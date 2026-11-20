@@ -1054,6 +1054,32 @@ class DashboardChildGridTests(unittest.TestCase):
             child.update(id=100 + index, gridPos=dict(x=0, y=0, w=6, h=4))
         return children
 
+    def test_empty_expanded_rows_skip_layout_pass(self):
+        empty_row_count = 64
+        iterations = 0
+
+        class EmptyChildren(list):
+            def __iter__(self):
+                nonlocal iterations
+                iterations += 1
+                return super().__iter__()
+
+        dashboard = synthetic_dashboard()
+        for index in range(empty_row_count):
+            dashboard["panels"].append(dict(
+                row(EmptyChildren(), collapsed=False), id=200 + index,
+                gridPos=dict(x=0, y=200 + index, w=24, h=1),
+            ))
+        saved_children = self.query_children()
+        saved_children[1]["gridPos"]["y"] = 4
+        dashboard["panels"].append(row(saved_children))
+        validate_dashboard(dashboard)
+        self.assertLessEqual(iterations, empty_row_count, "empty rows need no layout pass")
+
+        saved_children[1]["gridPos"]["y"] = 3
+        with self.assertRaisesRegex(ValueError, r"^panels 100 and 101 overlap$"):
+            validate_dashboard(dashboard)
+
     def test_saved_siblings_cannot_overlap_including_nested_rows(self):
         for nested in (False, True):
             for x, y in ((0, 0), (5, 3)):
