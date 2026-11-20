@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tracemalloc
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -525,6 +526,33 @@ class DashboardAdmissionTests(unittest.TestCase):
         self.assertIn(diagnostic, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_diagnostic_previews_clip_only_between_complete_escapes(self):
+        for char, unit in (("界", r"\u754c"), ("🧪", r"\U0001f9ea"),
+                           ("\x1b", r"\x1b"), ("\t", r"\t"), ("\\", r"\\")):
+            with self.subTest(unit=unit):
+                limit = 2 * len(unit) + 4
+                preview = diagnostic_text(char * 10, limit)
+                self.assertEqual(preview, unit * 2 + "...")
+                self.assertLessEqual(len(preview.encode("ascii")), limit)
+                self.assertEqual(diagnostic_text(char * 2, 2 * len(unit)), unit * 2)
+        for text in ("plain", "'", '"', "'\"\\"):
+            self.assertEqual(diagnostic_text(text), ascii(text)[1:-1])
+        self.assertEqual(diagnostic_text(1 << 128), "<large integer>")
+        self.assertEqual(diagnostic_text({"nested": "value"}), "<invalid value>")
+
+    def test_cli_diagnostic_clips_between_complete_escapes(self):
+        prefix = "Invalid dashboard synthetic.json: "
+        unit = r"\u754c"
+        available = 1024 - len(prefix) - 1
+        # Fill the budget except for one byte where the next escape would start.
+        count, padding = divmod(available - len("...") - 1, len(unit))
+        message = "x" * padding + "界" * (count + 10)
+        with patch("scripts.check_dashboard.read_asset", side_effect=ValueError(message)):
+            result = self.run_main("synthetic.json")
+        self.assert_invalid(result, "...")
+        self.assertEqual(result.stderr, prefix + "x" * padding + unit * count + "...\n")
+        self.assertLessEqual(len(result.stderr.encode("ascii")), 1024)
+
     def test_diagnostics_are_bounded_ascii_lines_and_preserve_the_asset(self):
         controls = "\x1b[31m\x1b]52;c;synthetic\x07\n\r\t\x7f\u202e"
         cases = []
@@ -883,6 +911,31 @@ class DashboardPanelBudgetTests(unittest.TestCase):
 
 
 class DashboardDepthTests(unittest.TestCase):
+    def test_wide_extensions_use_bounded_traversal_memory(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {
+            "entries": ["literal"] * 20_000,
+            "options": {str(index): 0 for index in range(20_000)},
+        }
+        # Measure only validation. Neither pending siblings nor strings visited
+        # for later reference checking should need storage proportional to width.
+        tracemalloc.start()
+        try:
+            validate_dashboard(dashboard)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 256 * 1024)
+
+    def test_extension_diagnostic_order(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"options": ["\ud800", float("inf"), "$last"]}
+        with self.assertRaisesRegex(ValueError, "^nonfinite JSON number$"):
+            validate_dashboard(dashboard)
+        dashboard["extension"]["options"] = ["$first", "$last"]
+        with self.assertRaisesRegex(ValueError, "^undefined variable last$"):
+            validate_dashboard(dashboard)
+
     def test_extension_container_depth_boundary(self):
         # The root object is depth 1; scalar values do not add container depth.
         for kind in (dict, list):

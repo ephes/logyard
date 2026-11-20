@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep ASCII escape sequences intact when truncating dashboard diagnostics.
+- Bound the dashboard scalar and metadata reference traversal stack by nesting
+  depth, including for wide extension arrays and objects.
 - Reject row headers whose `targets` is anything but an empty list, including
   nested rows.
 - Reject repeated required scope labels in panel and filter dropdown selectors.
