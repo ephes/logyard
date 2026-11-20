@@ -193,6 +193,26 @@ class DashboardAssetTests(unittest.TestCase):
         ]
         validate_dashboard(self.dashboard)
 
+    def test_misplaced_targets_are_rejected_on_nested_rows(self):
+        dashboard = copy.deepcopy(self.dashboard)
+        panels = dashboard["panels"]
+        panel = panels.pop(1)
+        inner = dict(row([]), id=100, targets=panel["targets"])
+        panels.append(row([inner]))
+        with self.assertRaisesRegex(ValueError, "panel 100: row must not declare targets"):
+            validate_dashboard(dashboard)
+
+        for targets in ({"A": panel["targets"][0]}, "x", 5, None, False, ()):
+            with self.subTest(targets=targets):
+                inner["targets"] = targets
+                with self.assertRaisesRegex(ValueError,
+                                            "panel 100: row must not declare targets"):
+                    validate_dashboard(dashboard)
+
+        inner["targets"] = []
+        validate_dashboard(dashboard)
+        validate_dashboard(self.dashboard)
+
     def test_required_fields(self):
         for path, key in (
             (("panels", 1), "id"), (("panels", 1), "type"),

@@ -281,9 +281,14 @@ def check_scoped_interpolation(query, context):
 
 
 def require_scope_matchers(matchers, required, context):
+    scoped = {}
+    for label, operator, content in matchers:
+        if label in required:
+            require(label not in scoped, context + f": repeated {label} matcher")
+            scoped[label] = (operator, content)
     for label, (operator, value) in required.items():
-        require(any(name == label and op == operator and re.fullmatch(value, content)
-                    for name, op, content in matchers),
+        actual_operator, content = scoped.get(label, (None, ""))
+        require(actual_operator == operator and re.fullmatch(value, content),
                 context + f": expected {label} filter")
 
 
@@ -449,6 +454,8 @@ def validate_dashboard(dashboard):
             if panel["type"] == "row":
                 require(type(panel.get("collapsed")) is bool,
                         f"panel {panel_id}: row collapsed must be a boolean")
+                require(panel.get("targets", []) == [],
+                        f"panel {panel_id}: row must not declare targets")
             if "panels" in panel:
                 require(panel["type"] == "row",
                         f"panel {panel_id}: only rows may store children")

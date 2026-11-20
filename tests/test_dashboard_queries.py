@@ -184,6 +184,21 @@ class DashboardVariableQueryTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, f"variable .*query scope: expected {label} filter"):
                         validate_dashboard(dashboard)
 
+    def test_dropdowns_reject_repeated_required_scope_labels(self):
+        for index, name, label, duplicate in (
+            (0, "host", "source_type", 'source_type!="journald"'),
+            (1, "service", "host", 'host!~"$host"'),
+            (2, "level", "service", 'service!~"$service"'),
+        ):
+            with self.subTest(variable=name, label=label):
+                dashboard = copy.deepcopy(self.dashboard)
+                variable = dashboard["templating"]["list"][index]
+                variable["query"] = variable["query"].replace("}", f", {duplicate}}}", 1)
+                with self.assertRaisesRegex(
+                    ValueError, f"variable {name}: invalid query scope: repeated {label} matcher"
+                ):
+                    validate_dashboard(dashboard)
+
     def test_dropdown_query_must_return_its_own_label_from_one_selector(self):
         for index, original in enumerate(self.dashboard["templating"]["list"]):
             name = original["name"]
@@ -501,6 +516,36 @@ class DashboardTargetScopeTests(unittest.TestCase):
         target["expr"] += ' + sum(count_over_time({host="other"}[5m]))'
         with self.assertRaisesRegex(ValueError, "scope"):
             validate_dashboard(dashboard)
+
+    def test_targets_reject_repeated_required_scope_labels(self):
+        source = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        for title, label, duplicate in (
+            ("Log Lines (5m)", "host", 'host!~"$host"'),
+            ("Log Lines (5m)", "service", 'service=~"$service"'),
+            ("Errors (15m)", "level", 'level!~"error|critical|alert|emerg"'),
+        ):
+            with self.subTest(panel=title, label=label):
+                dashboard = copy.deepcopy(source)
+                panel = next(panel for panel in dashboard["panels"] if panel["title"] == title)
+                target = panel["targets"][0]
+                target["expr"] = target["expr"].replace("{", f"{{{duplicate}, ", 1)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"panel {panel['id']}: target {target['refId']}:"
+                    f" invalid query scope: repeated {label} matcher",
+                ):
+                    validate_dashboard(dashboard)
+
+        validate_dashboard(source)
+
+    def test_repeated_nonrequired_matchers_remain_valid(self):
+        dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        matchers = 'environment=~"prod|staging", environment!="staging", '
+        target = dashboard["panels"][1]["targets"][0]
+        target["expr"] = target["expr"].replace("{", "{" + matchers, 1)
+        variable = dashboard["templating"]["list"][0]
+        variable["query"] = variable["query"].replace("{", "{" + matchers, 1)
+        validate_dashboard(dashboard)
 
     def test_level_exceptions_cannot_follow_selected_or_fixed_other_levels(self):
         for title in ("Errors (15m)", "Errors and Critical Logs", "Log Volume by Level"):
