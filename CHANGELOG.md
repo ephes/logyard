@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Build dashboard selector and scope diagnostics only on failure.
+- Require text panels to omit `targets` or use an empty list, including within rows.
 - Keep ASCII escape sequences intact when truncating dashboard diagnostics.
 - Bound the dashboard scalar and metadata reference traversal stack by nesting
   depth, including for wide extension arrays and objects.

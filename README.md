@@ -101,7 +101,7 @@ query panel, the `logyard-loki` datasource and defined variable references.
 Different panels may reuse a target `refId`. Each query panel must have at least
 one visible target: `hide` must be a boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target.
-Text panels do not need targets. Row headers may omit `targets` or use an
+Text panels and row headers may omit `targets` or use an
 empty list. Put query targets on data panels, including saved children of rows.
 Every target must explicitly set `queryType` to `instant` or `range`. Stat and
 bar-gauge panels require `instant`; logs and time-series panels require `range`.
@@ -151,6 +151,7 @@ string literals is split into whole `label op "value"` (or backtick) matchers,
 so text inside a quoted or backtick string never counts as a matcher, and
 pipeline templates such as `line_format "{{.message}}"` are not selectors.
 A `#` line comment ends at its newline; quotes and braces inside it are ignored.
+The checker builds selector and scope error messages only when a check fails.
 This is a focused contract for this asset's selectors, not a general LogQL
 parser or execution check.
 The three filter dropdown queries must each be a single

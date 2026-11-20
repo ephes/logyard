@@ -214,6 +214,21 @@ class DashboardAssetTests(unittest.TestCase):
         validate_dashboard(dashboard)
         validate_dashboard(self.dashboard)
 
+    def test_text_panels_allow_only_omitted_or_empty_targets(self):
+        panel = dict(id=100, title="Text", type="text", gridPos=dict(x=0, y=0, w=24, h=2))
+        stale_targets = [dict(refId="A", expr='{source_type="synthetic"}')]
+        for panels in ([panel], [row([panel])]):
+            self.dashboard["panels"] = panels
+            for targets in (stale_targets, {}, "", None, False, ()):
+                with self.subTest(nested=panels[0] is not panel, targets=targets):
+                    panel["targets"] = targets
+                    with self.assertRaisesRegex(ValueError, "panel 100: text must not declare targets"):
+                        validate_dashboard(self.dashboard)
+            panel["targets"] = []
+            validate_dashboard(self.dashboard)
+            del panel["targets"]
+            validate_dashboard(self.dashboard)
+
     def test_required_fields(self):
         for path, key in (
             (("panels", 1), "id"), (("panels", 1), "type"),
