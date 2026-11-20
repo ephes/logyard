@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Reject nonempty target lists on row headers, including nested rows.
+- Reject row headers whose `targets` is anything but an empty list, including
+  nested rows.
 - Reject repeated required scope labels in panel and filter dropdown selectors.
 - Reject unpaired Unicode surrogate escapes in dashboard JSON keys and values.
 - Refuse dashboards with more than 256 variables before scanning query text.

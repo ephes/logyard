@@ -454,8 +454,7 @@ def validate_dashboard(dashboard):
             if panel["type"] == "row":
                 require(type(panel.get("collapsed")) is bool,
                         f"panel {panel_id}: row collapsed must be a boolean")
-                targets = panel.get("targets")
-                require(not (isinstance(targets, list) and targets),
+                require(panel.get("targets", []) == [],
                         f"panel {panel_id}: row must not declare targets")
             if "panels" in panel:
                 require(panel["type"] == "row",

@@ -202,6 +202,13 @@ class DashboardAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "panel 100: row must not declare targets"):
             validate_dashboard(dashboard)
 
+        for targets in ({"A": panel["targets"][0]}, "x", 5, None, False, ()):
+            with self.subTest(targets=targets):
+                inner["targets"] = targets
+                with self.assertRaisesRegex(ValueError,
+                                            "panel 100: row must not declare targets"):
+                    validate_dashboard(dashboard)
+
         inner["targets"] = []
         validate_dashboard(dashboard)
         validate_dashboard(self.dashboard)
