@@ -59,10 +59,25 @@ def diagnostic_text(value, limit=128):
         value = str(value) if value.bit_length() <= 128 else "<large integer>"
     if not isinstance(value, str):
         return "<invalid value>"
-    escaped = ascii(value[:limit])[1:-1]
-    if len(value) > limit or len(escaped) > limit:
-        return escaped[:limit - 3] + "..."
-    return escaped
+    preview = value[:limit]
+    # Match ascii(preview)'s choice of quote when escaping individual characters.
+    quote = '"' if "'" in preview and '"' not in preview else "'"
+    units = []
+    remaining = limit
+    for char in preview:
+        unit = "\\" + char if char == quote else ascii(char)[1:-1]
+        if len(unit) > remaining:
+            break
+        units.append(unit)
+        remaining -= len(unit)
+    if len(units) < len(value):
+        ellipsis = "..."
+        if limit < len(ellipsis):
+            return ellipsis[:max(0, limit)]
+        while remaining < len(ellipsis):
+            remaining += len(units.pop())
+        units.append(ellipsis)
+    return "".join(units)
 
 
 def require(condition, message):

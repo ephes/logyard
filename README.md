@@ -244,7 +244,8 @@ passes. Each traversal keeps one pending iterator per open container, so its
 stack is bounded by nesting depth even for wide extension arrays and objects.
 CLI validation failures emit one ASCII diagnostic line of at most 1,024 bytes,
 including its final newline. Paths and scalar identifiers are escaped and
-clipped to bounded previews; malformed panel ids report their sibling index
+clipped to bounded previews. Truncation adds an ellipsis after the last
+complete escaped character. Malformed panel ids report their sibling index
 without formatting the rejected value or nested containers. Terminal controls,
 newlines and Unicode direction marks cannot act on the terminal. The same path
 escaping applies to success output. Validation never rewrites the asset.

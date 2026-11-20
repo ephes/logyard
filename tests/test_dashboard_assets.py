@@ -526,6 +526,33 @@ class DashboardAdmissionTests(unittest.TestCase):
         self.assertIn(diagnostic, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_diagnostic_previews_clip_only_between_complete_escapes(self):
+        for char, unit in (("界", r"\u754c"), ("🧪", r"\U0001f9ea"),
+                           ("\x1b", r"\x1b"), ("\t", r"\t"), ("\\", r"\\")):
+            with self.subTest(unit=unit):
+                limit = 2 * len(unit) + 4
+                preview = diagnostic_text(char * 10, limit)
+                self.assertEqual(preview, unit * 2 + "...")
+                self.assertLessEqual(len(preview.encode("ascii")), limit)
+                self.assertEqual(diagnostic_text(char * 2, 2 * len(unit)), unit * 2)
+        for text in ("plain", "'", '"', "'\"\\"):
+            self.assertEqual(diagnostic_text(text), ascii(text)[1:-1])
+        self.assertEqual(diagnostic_text(1 << 128), "<large integer>")
+        self.assertEqual(diagnostic_text({"nested": "value"}), "<invalid value>")
+
+    def test_cli_diagnostic_clips_between_complete_escapes(self):
+        prefix = "Invalid dashboard synthetic.json: "
+        unit = r"\u754c"
+        available = 1024 - len(prefix) - 1
+        # Fill the budget except for one byte where the next escape would start.
+        count, padding = divmod(available - len("...") - 1, len(unit))
+        message = "x" * padding + "界" * (count + 10)
+        with patch("scripts.check_dashboard.read_asset", side_effect=ValueError(message)):
+            result = self.run_main("synthetic.json")
+        self.assert_invalid(result, "...")
+        self.assertEqual(result.stderr, prefix + "x" * padding + unit * count + "...\n")
+        self.assertLessEqual(len(result.stderr.encode("ascii")), 1024)
+
     def test_diagnostics_are_bounded_ascii_lines_and_preserve_the_asset(self):
         controls = "\x1b[31m\x1b]52;c;synthetic\x07\n\r\t\x7f\u202e"
         cases = []
