@@ -366,6 +366,25 @@ def check_target_scope(panel, target, variable_names):
     check_scoped_interpolation(target["expr"], context)
 
 
+def _walk_dashboard(dashboard):
+    """Yield nodes in reverse sibling order with one iterator per open container."""
+    yield dashboard, 1, None, None
+    stack = [(id(dashboard), reversed(dashboard.items()))]
+    while stack:
+        owner, children = stack[-1]
+        entry = next(children, None)
+        if entry is None:
+            stack.pop()
+            continue
+        key, value = entry
+        yield value, len(stack) + 1, owner, key
+        if isinstance(value, dict):
+            stack.append((id(value), reversed(value.items())))
+        elif isinstance(value, list):
+            children = zip(reversed(range(len(value))), reversed(value))
+            stack.append((id(value), children))
+
+
 def validate_dashboard(dashboard):
     """Validate this asset's shape and references, not the Grafana/LogQL schema."""
     require(isinstance(dashboard, dict), "dashboard must be an object")
@@ -405,20 +424,13 @@ def validate_dashboard(dashboard):
     require({"host", "service", "level"} <= names, "host, service and level variables are required")
 
     # Check JSON depth and scalars, including extensions, before recursive panel checks.
-    strings = []
-    pending = [(dashboard, 1, None, None)]
-    while pending:
-        value, depth, owner, key = pending.pop()
+    for value, depth, _, key in _walk_dashboard(dashboard):
         if ((isinstance(key, str) and SURROGATE.search(key))
                 or (isinstance(value, str) and SURROGATE.search(value))):
             raise ValueError("dashboard text contains a Unicode surrogate")
         if isinstance(value, (dict, list)):
             require(depth <= MAX_NESTING,
                     f"dashboard nesting exceeds {MAX_NESTING} container levels")
-            children = value.items() if isinstance(value, dict) else enumerate(value)
-            pending.extend((child, depth + 1, id(value), key) for key, child in children)
-        elif isinstance(value, str):
-            strings.append((value, owner, key))
         elif isinstance(value, float):
             require(math.isfinite(value), "nonfinite JSON number")
 
@@ -506,8 +518,8 @@ def validate_dashboard(dashboard):
     panels = dashboard.get("panels")
     require(isinstance(panels, list) and panels, "dashboard panels must be a nonempty list")
     check_panels(panels)
-    for value, owner, key in strings:
-        if (owner, key) not in query_fields:
+    for value, _, owner, key in _walk_dashboard(dashboard):
+        if isinstance(value, str) and (owner, key) not in query_fields:
             check_references(value)
 
     # Check only siblings in each layout, after admitting the global panel

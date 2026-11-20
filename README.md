@@ -239,6 +239,9 @@ JSON nesting is limited to 64 container levels, including extension objects and
 saved rows: the dashboard root object is level 1, each nested object or array adds
 one level, and scalar values add none. Excessive nesting during decoding or
 validation fails with exit 1 and a concise diagnostic instead of a traceback.
+Scalar and metadata reference checks walk the tree in separate depth-first
+passes. Each traversal keeps one pending iterator per open container, so its
+stack is bounded by nesting depth even for wide extension arrays and objects.
 CLI validation failures emit one ASCII diagnostic line of at most 1,024 bytes,
 including its final newline. Paths and scalar identifiers are escaped and
 clipped to bounded previews; malformed panel ids report their sibling index

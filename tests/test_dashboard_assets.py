@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tracemalloc
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -883,6 +884,31 @@ class DashboardPanelBudgetTests(unittest.TestCase):
 
 
 class DashboardDepthTests(unittest.TestCase):
+    def test_wide_extensions_use_bounded_traversal_memory(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {
+            "entries": ["literal"] * 20_000,
+            "options": {str(index): 0 for index in range(20_000)},
+        }
+        # Measure only validation. Neither pending siblings nor strings visited
+        # for later reference checking should need storage proportional to width.
+        tracemalloc.start()
+        try:
+            validate_dashboard(dashboard)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 256 * 1024)
+
+    def test_extension_diagnostic_order(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"options": ["\ud800", float("inf"), "$last"]}
+        with self.assertRaisesRegex(ValueError, "^nonfinite JSON number$"):
+            validate_dashboard(dashboard)
+        dashboard["extension"]["options"] = ["$first", "$last"]
+        with self.assertRaisesRegex(ValueError, "^undefined variable last$"):
+            validate_dashboard(dashboard)
+
     def test_extension_container_depth_boundary(self):
         # The root object is depth 1; scalar values do not add container depth.
         for kind in (dict, list):
