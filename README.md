@@ -98,8 +98,10 @@ snapshot or detect every possible write on filesystems with coarse timestamps.
 It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
-Different panels may reuse a target `refId`. Each query panel must have at least
-one visible target: `hide` must be a boolean when present and defaults to false
+Different panels may reuse a target `refId`. The duplicate check compares full
+references and builds a bounded preview only when it finds a duplicate.
+Each query panel must have at least one visible target: `hide` must be a
+boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target.
 Text panels and row headers may omit `targets` or use an
 empty list. Put query targets on data panels, including saved children of rows.

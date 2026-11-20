@@ -151,6 +151,30 @@ class DashboardAssetTests(unittest.TestCase):
         panel["targets"].append(extra)
         validate_dashboard(self.dashboard)
 
+    def test_duplicate_target_refid_diagnostic_is_built_only_on_failure(self):
+        panel = self.dashboard["panels"][1]
+        template = panel["targets"][0]
+        duplicate_ref = "target-duplicate\n" + "x" * 200
+        refs = [f"target-{index}" for index in range(64)] + [duplicate_ref]
+        panel["targets"] = [dict(template, refId=ref) for ref in refs]
+        ref_set = set(refs)
+
+        with patch("scripts.check_dashboard.diagnostic_text", wraps=diagnostic_text) as format_text:
+            validate_dashboard(self.dashboard)
+        # The scope check also uses each reference in its own diagnostic context.
+        self.assertEqual(
+            [call.args[0] for call in format_text.call_args_list if call.args[0] in ref_set],
+            refs,
+        )
+
+        panel["targets"].append(panel["targets"][-1].copy())
+        with self.assertRaises(ValueError) as error:
+            validate_dashboard(self.dashboard)
+        self.assertEqual(
+            str(error.exception),
+            f"panel {panel['id']}: duplicate target refId {diagnostic_text(duplicate_ref)}",
+        )
+
     def test_query_panels_require_a_visible_target_including_rows(self):
         for nested in (False, True):
             with self.subTest(nested=nested):

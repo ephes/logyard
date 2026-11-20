@@ -521,8 +521,10 @@ def validate_dashboard(dashboard):
                     check_reference_syntax(target["expr"], f"panel {panel_id}: invalid target")
                     check_references(target["expr"], logql=True)
                     ref_id = target["refId"]
-                    require(ref_id not in ref_ids,
-                            f"panel {panel_id}: duplicate target refId {diagnostic_text(ref_id)}")
+                    if ref_id in ref_ids:
+                        raise ValueError(
+                            f"panel {panel_id}: duplicate target refId {diagnostic_text(ref_id)}"
+                        )
                     ref_ids.add(ref_id)
                     require("hide" not in target or type(target["hide"]) is bool,
                             f"panel {panel_id}: target hide must be a boolean")
