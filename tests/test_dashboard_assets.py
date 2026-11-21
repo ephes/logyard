@@ -930,6 +930,27 @@ class DashboardPanelBudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"^panels 255 and 256 overlap$"):
             validate_dashboard(dashboard)
 
+    def test_tall_single_column_layout_limits_comparisons(self):
+        comparisons = 0
+
+        class MeasuredY(int):
+            def __lt__(self, other):
+                nonlocal comparisons
+                comparisons += 1
+                return super().__lt__(other)
+
+        class MeasuredGrid(dict):
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                # Shape validation via dict.get still sees the original int.
+                return MeasuredY(value) if key == "y" else value
+
+        dashboard = self.dashboard_with_panels(self.LIMIT)
+        for panel in dashboard["panels"]:
+            panel["gridPos"] = MeasuredGrid(panel["gridPos"])
+        validate_dashboard(dashboard)
+        self.assertLessEqual(comparisons, 3 * self.LIMIT)
+
     def test_panel_budget_boundary_includes_saved_nested_children(self):
         for nested in (False, True):
             for count in (self.LIMIT, self.LIMIT + 1):
@@ -1054,6 +1075,32 @@ class DashboardChildGridTests(unittest.TestCase):
             child.update(id=100 + index, gridPos=dict(x=0, y=0, w=6, h=4))
         return children
 
+    def test_empty_expanded_rows_skip_layout_pass(self):
+        empty_row_count = 64
+        iterations = 0
+
+        class EmptyChildren(list):
+            def __iter__(self):
+                nonlocal iterations
+                iterations += 1
+                return super().__iter__()
+
+        dashboard = synthetic_dashboard()
+        for index in range(empty_row_count):
+            dashboard["panels"].append(dict(
+                row(EmptyChildren(), collapsed=False), id=200 + index,
+                gridPos=dict(x=0, y=200 + index, w=24, h=1),
+            ))
+        saved_children = self.query_children()
+        saved_children[1]["gridPos"]["y"] = 4
+        dashboard["panels"].append(row(saved_children))
+        validate_dashboard(dashboard)
+        self.assertLessEqual(iterations, empty_row_count, "empty rows need no layout pass")
+
+        saved_children[1]["gridPos"]["y"] = 3
+        with self.assertRaisesRegex(ValueError, r"^panels 100 and 101 overlap$"):
+            validate_dashboard(dashboard)
+
     def test_saved_siblings_cannot_overlap_including_nested_rows(self):
         for nested in (False, True):
             for x, y in ((0, 0), (5, 3)):
@@ -1076,6 +1123,18 @@ class DashboardChildGridTests(unittest.TestCase):
                 children[1]["gridPos"].update(x=x, y=y)
                 dashboard["panels"] = [row(children)]
                 validate_dashboard(dashboard)
+
+    def test_saved_siblings_use_grid_columns_and_report_ids_in_sibling_order(self):
+        dashboard = synthetic_dashboard()
+        lower, upper = self.query_children()
+        lower["gridPos"].update(x=23, y=4, w=1)
+        upper["gridPos"].update(x=22, y=0, w=2)
+        dashboard["panels"] = [row([lower, upper])]
+        validate_dashboard(dashboard)
+
+        lower["gridPos"]["y"] = 3
+        with self.assertRaisesRegex(ValueError, r"^panels 100 and 101 overlap$"):
+            validate_dashboard(dashboard)
 
     def test_saved_siblings_are_scoped_to_their_own_row(self):
         dashboard = synthetic_dashboard()
