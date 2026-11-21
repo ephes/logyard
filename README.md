@@ -251,9 +251,12 @@ JSON nesting is limited to 64 container levels, including extension objects and
 saved rows: the dashboard root object is level 1, each nested object or array adds
 one level, and scalar values add none. Excessive nesting during decoding or
 validation fails with exit 1 and a concise diagnostic instead of a traceback.
-Scalar and metadata reference checks walk the tree in separate depth-first
-passes. Each traversal keeps one pending iterator per open container, so its
-stack is bounded by nesting depth even for wide extension arrays and objects.
+After decoding, the structural pass allows at most 65,536 JSON nodes before
+query, panel and metadata reference checks run. The root object, each object
+member value and each array element count once, including extension values.
+The structural and metadata reference passes each keep one pending iterator
+per open container, so their stacks are bounded by nesting depth even for wide
+extension arrays and objects.
 CLI validation failures emit one ASCII diagnostic line of at most 1,024 bytes,
 including its final newline. Paths and scalar identifiers are escaped and
 clipped to bounded previews. Truncation adds an ellipsis after the last

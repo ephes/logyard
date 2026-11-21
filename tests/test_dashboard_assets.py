@@ -772,6 +772,13 @@ class DashboardAdmissionTests(unittest.TestCase):
     def test_cli_rejects_invalid_utf8(self):
         self.assert_invalid(self.run_cli(b"\xff"), "utf-8")
 
+    def test_cli_rejects_excess_decoded_nodes_below_byte_limit(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = [0] * 65_536
+        content = json.dumps(dashboard, separators=(",", ":")).encode("utf-8")
+        self.assertLess(len(content), self.BYTE_LIMIT)
+        self.assert_invalid(self.run_cli(content), "dashboard node count exceeds 65536")
+
     def test_rejects_lone_surrogates_in_extension_keys_and_values(self):
         diagnostic = "dashboard text contains a Unicode surrogate"
         for surrogate in ("\ud800", "\udfff"):
@@ -1049,6 +1056,33 @@ class DashboardPanelBudgetTests(unittest.TestCase):
 
 
 class DashboardDepthTests(unittest.TestCase):
+    def test_node_budget_is_inclusive_and_stops_the_structural_walk(self):
+        limit = 65_536
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"entries": []}
+        walk = check_dashboard._walk_dashboard
+        base_nodes = sum(1 for _ in walk(dashboard))
+        entries = dashboard["extension"]["entries"]
+        entries.extend([None] * (limit - base_nodes))
+        validate_dashboard(dashboard)
+
+        entries.extend([None] * 10_000)
+        visited = 0
+
+        def count_nodes(dashboard):
+            nonlocal visited
+            for node in walk(dashboard):
+                visited += 1
+                yield node
+
+        with patch.object(check_dashboard, "_walk_dashboard", side_effect=count_nodes) as walker, \
+                patch.object(check_dashboard, "check_target_scope") as check_scope:
+            with self.assertRaisesRegex(ValueError, "^dashboard node count exceeds 65536$"):
+                validate_dashboard(dashboard)
+            walker.assert_called_once_with(dashboard)
+            check_scope.assert_not_called()
+        self.assertEqual(visited, limit + 1)
+
     def test_wide_extensions_use_bounded_traversal_memory(self):
         dashboard = synthetic_dashboard()
         dashboard["extension"] = {
