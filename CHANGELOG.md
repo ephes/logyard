@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reject surrounding whitespace in dashboard target `refId` values.
 - Reuse parsed selector matchers when checking the required dashboard dropdown scope.
 - Share full-query variable references between dashboard target scope checks.
 - Check dashboard overlaps between neighboring vertical intervals in each Grafana grid column.
