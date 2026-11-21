@@ -331,10 +331,12 @@ def check_variable_query_scope(variable, variable_names):
     context = f"variable {diagnostic_text(name)}: invalid query scope"
     query = variable["query"]
     selectors = stream_selectors(query)
+    matchers = []
     if selectors:
         check_executable_variables(query, context, variable_names)
+        # Only a single selector can reach the required dropdown scope check.
         for selector in selectors:
-            selector_matchers(selector, context)
+            matchers = selector_matchers(selector, context)
     if name not in ("host", "service", "level"):
         if selectors:
             check_scoped_interpolation(query, context)
@@ -357,7 +359,7 @@ def check_variable_query_scope(variable, variable_names):
         required["host"] = ("=~", selector_reference("host"))
     if name == "level":
         required["service"] = ("=~", selector_reference("service"))
-    require_scope_matchers(selector_matchers(selectors[0], context), required, context)
+    require_scope_matchers(matchers, required, context)
     check_scoped_interpolation(query, context)
 
 

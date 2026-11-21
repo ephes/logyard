@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reuse parsed selector matchers when checking the required dashboard dropdown scope.
 - Check dashboard overlaps between neighboring vertical intervals in each Grafana grid column.
 - Skip overlap checks for empty dashboard row child lists.
 - Build target reference previews for duplicate diagnostics only when a duplicate is found.

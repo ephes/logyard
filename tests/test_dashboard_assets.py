@@ -13,8 +13,9 @@ import tempfile
 import tracemalloc
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
+from scripts import check_dashboard
 from scripts.check_dashboard import DEFAULT_PATH, diagnostic_text, main, validate_dashboard
 
 
@@ -340,6 +341,32 @@ class DashboardAssetTests(unittest.TestCase):
                 dashboard["templating"]["list"][host]["query"] = changed
                 with self.assertRaisesRegex(ValueError, "invalid query scope"):
                     validate_dashboard(dashboard)
+
+    def test_scoped_dropdowns_parse_each_selector_once(self):
+        names = {"host", "service", "level"}
+        for variable in self.dashboard["templating"]["list"]:
+            name = variable["name"]
+            selector, = check_dashboard.stream_selectors(variable["query"])
+            missing_scope = selector.replace('source_type="journald"', 'source_type="other"')
+            for content, label, error in (
+                (selector, name, None),
+                (missing_scope, name, "expected source_type filter"),
+                (selector + ", malformed", "other", "unparseable selector"),
+                (missing_scope, "other", "expected returned label"),
+            ):
+                with self.subTest(name=name, error=error):
+                    query = f"label_values({{{content}}}, {label})"
+                    dropdown = dict(variable, query=query)
+                    with patch.object(check_dashboard, "selector_matchers",
+                                      wraps=check_dashboard.selector_matchers) as parse:
+                        if error is None:
+                            check_dashboard.check_variable_query_scope(dropdown, names)
+                        else:
+                            with self.assertRaisesRegex(ValueError, error):
+                                check_dashboard.check_variable_query_scope(dropdown, names)
+                    self.assertEqual(parse.call_args_list, [
+                        call(content, f"variable {name}: invalid query scope"),
+                    ])
 
     def test_references_inside_variable_query_comments_are_dependencies(self):
         # Grafana resolves dependencies over the whole text: level already
