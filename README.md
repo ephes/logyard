@@ -162,8 +162,9 @@ The three filter dropdown queries must each be a single
 and `level` requires both `host=~"$host"` and `service=~"$service"`.
 The same safe interpolation forms and whole-matcher checks apply here, so
 unscoped `label_values(service)`, wrong returned labels and parent filters
-hidden inside strings are rejected before provisioning. This keeps service
-choices within the selected host and level choices within the selected
+hidden inside strings are rejected before provisioning. The checker parses each
+selector once and reuses the matchers to verify the required dropdown scope.
+This keeps service choices within the selected host and level choices within the selected
 host/service. For `host`, `service` and `level`, `includeAll` and `multi` must be booleans
 when present (omission means false), and at least one must be true: Grafana's
 Loki datasource otherwise bypasses literal regex escaping. `allValue` may be
@@ -229,7 +230,9 @@ In target `expr` and variable `query` fields, an unknown reference that appears 
 inside a `#` line comment is not reported as undefined. Comments do not hide
 references otherwise: Grafana interpolates and resolves dependencies over the whole
 query text, so references in comments still count for the dependency graph and the
-fixed-level panel exceptions (a value with a newline would end the comment). The
+fixed-level panel exceptions (a value with a newline would end the comment).
+The target scope checks share one reference set from the full query. The
+undefined-variable check uses a separate set that excludes line comments. The
 `label_values(selector, label)` wrapper of the host, service and level variables is
 checked on the raw query: a comment inside or after it fails, because Grafana would
 then fall back to a label-names query. References inside double-quoted or backtick
