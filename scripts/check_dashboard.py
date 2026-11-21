@@ -129,18 +129,18 @@ def read_asset(path):
 def without_query_comments(query):
     """Remove LogQL # comments while preserving quoted interpolation and newlines."""
     parts = []
-    index = 0
+    start = index = 0
     while index < len(query):
-        start = index
-        if query[index] in '"`':
+        char = query[index]
+        if char in '"`':
             index = skip_string(query, index)
-        elif query[index] == "#":
+        elif char == "#":
+            parts.append(query[start:index])
             end = query.find("\n", index)
-            index = len(query) if end == -1 else end
-            continue
+            start = index = len(query) if end == -1 else end
         else:
             index += 1
-        parts.append(query[start:index])
+    parts.append(query[start:])
     return "".join(parts)
 
 
@@ -524,10 +524,12 @@ def validate_dashboard(dashboard):
                     for key in ("expr", "refId"):
                         require(isinstance(target.get(key), str) and target[key].strip(),
                                 f"panel {panel_id}: missing target {key}")
+                    ref_id = target["refId"]
+                    if ref_id != ref_id.strip():
+                        raise ValueError(f"panel {panel_id}: target refId must not have surrounding whitespace")
                     query_fields.add((id(target), "expr"))
                     check_reference_syntax(target["expr"], f"panel {panel_id}: invalid target")
                     check_references(target["expr"], logql=True)
-                    ref_id = target["refId"]
                     if ref_id in ref_ids:
                         raise ValueError(
                             f"panel {panel_id}: duplicate target refId {diagnostic_text(ref_id)}"

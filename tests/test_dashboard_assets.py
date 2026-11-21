@@ -142,6 +142,19 @@ class DashboardAssetTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "duplicate target refId"):
                     validate_dashboard(dashboard)
 
+    def test_padded_target_refids_are_rejected_including_rows(self):
+        for nested in (False, True):
+            for padding in (" {}", "{}\t", "\u00a0{}\n"):
+                with self.subTest(nested=nested, padding=padding):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    panel = dashboard["panels"][1]
+                    target = panel["targets"][0]
+                    panel["targets"].append(dict(target, refId=padding.format(target["refId"])))
+                    if nested:
+                        dashboard["panels"][1] = row([panel])
+                    with self.assertRaisesRegex(ValueError, "target refId must not have surrounding whitespace"):
+                        validate_dashboard(dashboard)
+
     def test_target_refids_are_scoped_to_each_panel(self):
         panel = self.dashboard["panels"][1]
         other = copy.deepcopy(panel)

@@ -98,8 +98,10 @@ snapshot or detect every possible write on filesystems with coarse timestamps.
 It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
-Different panels may reuse a target `refId`. The duplicate check compares full
-references and builds a bounded preview only when it finds a duplicate.
+Each target `refId` must be nonempty and use its stripped spelling, with no
+leading or trailing whitespace. Different panels may reuse a target `refId`.
+The duplicate check compares full references and builds a bounded preview only
+when it finds a duplicate.
 Each query panel must have at least one visible target: `hide` must be a
 boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target.
@@ -153,6 +155,8 @@ string literals is split into whole `label op "value"` (or backtick) matchers,
 so text inside a quoted or backtick string never counts as a matcher, and
 pipeline templates such as `line_format "{{.message}}"` are not selectors.
 A `#` line comment ends at its newline; quotes and braces inside it are ignored.
+When removing comments for reference checks, the scanner retains contiguous
+spans of query text, including newlines and hashes inside quoted strings.
 The checker builds selector and scope error messages only when a check fails.
 This is a focused contract for this asset's selectors, not a general LogQL
 parser or execution check.

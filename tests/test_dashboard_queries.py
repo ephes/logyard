@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from scripts.check_dashboard import (
     check_scoped_interpolation, require, selector_matchers, stream_selectors, validate_dashboard,
+    without_query_comments,
 )
 
 
@@ -637,6 +638,28 @@ class DashboardTargetScopeTests(unittest.TestCase):
             '| line_format "{{.message}}" | label_format x=`{{.host}}` [5m]))'
         )
         validate_dashboard(dashboard)
+
+    def test_query_comment_removal_slices_only_at_comments(self):
+        class SliceCountingQuery(str):
+            slices = 0
+
+            def __getitem__(self, key):
+                if isinstance(key, slice):
+                    self.slices += 1
+                return super().__getitem__(key)
+
+        expression = r'{service="worker\"#kept"} |~ `#also kept`'
+        long_query = expression + " " * 65536 + "[5m]"
+        cases = (
+            (long_query, long_query, 1),
+            ('# "open quote\n' + expression + ' # `open backtick\n# comment\n[5m]# EOF',
+             '\n' + expression + ' \n\n[5m]', 5),
+        )
+        for text, expected, max_slices in cases:
+            with self.subTest(max_slices=max_slices):
+                query = SliceCountingQuery(text)
+                self.assertEqual(without_query_comments(query), expected)
+                self.assertLessEqual(query.slices, max_slices)
 
     def test_comment_quotes_cannot_hide_an_unscoped_selector(self):
         dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
