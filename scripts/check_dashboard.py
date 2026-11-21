@@ -313,15 +313,15 @@ def require_scope_matchers(matchers, required, context):
             raise ValueError(context + f": expected {label} filter")
 
 
-def check_executable_variables(query, context, variable_names):
+def check_executable_variables(references, context, variable_names):
     """Only the three policy-scoped filters may inject custom query values.
 
-    Grafana interpolates comments and pipeline strings too, so inspect the
-    entire query. Additional dropdowns need their own agreed escaping/All
+    References must include comments and pipeline strings, where Grafana also
+    interpolates. Additional dropdowns need their own agreed escaping/All
     contract before their values can be used in executable queries.
     """
     additional = variable_names - {"host", "service", "level"}
-    for name in sorted(variable_references(query) & additional):
+    for name in sorted(references & additional):
         raise ValueError(context + f": unsupported additional variable {diagnostic_text(name)}")
 
 
@@ -333,7 +333,7 @@ def check_variable_query_scope(variable, variable_names):
     selectors = stream_selectors(query)
     matchers = []
     if selectors:
-        check_executable_variables(query, context, variable_names)
+        check_executable_variables(variable_references(query), context, variable_names)
         # Only a single selector can reach the required dropdown scope check.
         for selector in selectors:
             matchers = selector_matchers(selector, context)
@@ -367,8 +367,10 @@ def check_target_scope(panel, target, variable_names):
     """Enforce this asset's label policy, without parsing LogQL expressions."""
     context = (f"panel {diagnostic_text(panel['id'])}: "
                f"target {diagnostic_text(target['refId'])}: invalid query scope")
-    check_executable_variables(target["expr"], context, variable_names)
-    selectors = stream_selectors(target["expr"])
+    query = target["expr"]
+    references = variable_references(query)
+    check_executable_variables(references, context, variable_names)
+    selectors = stream_selectors(query)
     if not selectors:
         raise ValueError(context + ": missing selector")
     required = {"source_type": ("=", r"journald")}
@@ -381,14 +383,14 @@ def check_target_scope(panel, target, variable_names):
     if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
         # Grafana interpolates $level in comments too; a value with a newline
         # would end the comment, so comment references count here.
-        if "level" in variable_references(target["expr"]):
+        if "level" in references:
             raise ValueError(context + ": unexpected level variable")
     for selector in selectors:
         matchers = selector_matchers(selector, context)
         require_scope_matchers(matchers, required, context)
         if panel["title"] == "Log Volume by Level" and any(name == "level" for name, _, _ in matchers):
             raise ValueError(context + ": volume must compare all levels")
-    check_scoped_interpolation(target["expr"], context)
+    check_scoped_interpolation(query, context)
 
 
 def _walk_dashboard(dashboard):

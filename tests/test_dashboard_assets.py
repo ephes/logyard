@@ -325,6 +325,32 @@ class DashboardAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unexpected level variable"):
             validate_dashboard(dashboard)
 
+    def test_error_target_shares_the_full_query_reference_inventory(self):
+        for comment, error in (
+            ("$missing", None),
+            ("$missing $level", "unexpected level variable"),
+            ("$missing $level $region", "unsupported additional variable region"),
+        ):
+            with self.subTest(comment=comment):
+                dashboard = copy.deepcopy(self.dashboard)
+                variables = dashboard["templating"]["list"]
+                variables.append(dict(variables[0], name="region", query="label_values(region)"))
+                panel = next(panel for panel in dashboard["panels"] if panel["title"] == "Errors (15m)")
+                target = panel["targets"][0]
+                target["expr"] += f" # {comment}"
+                query = target["expr"]
+                with patch.object(check_dashboard, "variable_references",
+                                  wraps=check_dashboard.variable_references) as references:
+                    if error is None:
+                        validate_dashboard(dashboard)
+                    else:
+                        with self.assertRaisesRegex(ValueError, error):
+                            validate_dashboard(dashboard)
+                self.assertEqual(
+                    [scan for scan in references.call_args_list if scan.args == (query,)],
+                    [call(query, logql=True), call(query)],
+                )
+
     def test_variable_query_comments_break_the_label_values_wrapper(self):
         # Grafana matches label_values(...) on the raw text and otherwise falls
         # back to a label-names query, so no comment may follow or split it.

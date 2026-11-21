@@ -230,7 +230,9 @@ In target `expr` and variable `query` fields, an unknown reference that appears 
 inside a `#` line comment is not reported as undefined. Comments do not hide
 references otherwise: Grafana interpolates and resolves dependencies over the whole
 query text, so references in comments still count for the dependency graph and the
-fixed-level panel exceptions (a value with a newline would end the comment). The
+fixed-level panel exceptions (a value with a newline would end the comment).
+The target scope checks share one reference set from the full query. The
+undefined-variable check uses a separate set that excludes line comments. The
 `label_values(selector, label)` wrapper of the host, service and level variables is
 checked on the raw query: a comment inside or after it fails, because Grafana would
 then fall back to a label-names query. References inside double-quoted or backtick
