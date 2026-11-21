@@ -111,7 +111,7 @@ def read_asset(path):
         message = f"dashboard exceeds {MAX_ASSET_BYTES}-byte limit"
         require(info.st_size <= MAX_ASSET_BYTES, message)
         with os.fdopen(descriptor, "rb", closefd=False) as stream:
-            content = stream.read(MAX_ASSET_BYTES + 1)
+            content = stream.read(info.st_size + 1)
         require(len(content) <= MAX_ASSET_BYTES, message)
         final = os.fstat(descriptor)
         # Do not restat the path: an atomic replacement may leave us holding

@@ -839,20 +839,32 @@ class DashboardAdmissionTests(unittest.TestCase):
                 reader.assert_not_called()
                 close.assert_called_once()
 
-    def test_actual_read_is_bounded_when_file_grows_after_stat(self):
+    def test_small_asset_read_requests_only_its_size_plus_one(self):
         content = json.dumps(synthetic_dashboard()).encode("utf-8")
-        oversized = content + b" " * (self.BYTE_LIMIT + 100 - len(content))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.json"
             path.write_bytes(content)
-            # The descriptor reports the initial size but now supplies more data.
-            with io.BytesIO(oversized) as stream, \
+            with io.BytesIO(content) as stream, \
                     patch.object(stream, "read", wraps=stream.read) as read, \
-                    patch("os.fdopen", return_value=stream), \
-                    patch("os.close", wraps=os.close) as close:
-                self.assert_invalid(self.run_main(path), "byte limit")
-                read.assert_called_once_with(self.BYTE_LIMIT + 1)
-                close.assert_called_once()
+                    patch("os.fdopen", return_value=stream):
+                result = self.run_main(path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                read.assert_called_once_with(len(content) + 1)
+
+    def test_actual_read_is_bounded_when_file_grows_after_stat(self):
+        content = json.dumps(synthetic_dashboard()).encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            for size, diagnostic in ((len(content), "dashboard changed while reading"),
+                                     (self.BYTE_LIMIT, "byte limit")):
+                with self.subTest(size=size):
+                    path.write_bytes(content.ljust(size, b" "))
+
+                    def append():
+                        with path.open("ab") as writer:
+                            writer.write(b"  ")
+
+                    self.assert_invalid(self.read_with_mutation(path, append), diagnostic)
 
     def read_with_mutation(self, path, mutate):
         real_fdopen = os.fdopen

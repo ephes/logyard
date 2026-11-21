@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Size dashboard read requests to the checked file size plus one byte.
 - Keep contiguous query spans when removing LogQL comments, reducing temporary allocations.
 - Reject surrounding whitespace in dashboard target `refId` values.
 - Reuse parsed selector matchers when checking the required dashboard dropdown scope.
