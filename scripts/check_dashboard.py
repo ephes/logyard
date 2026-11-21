@@ -17,6 +17,7 @@ DEFAULT_PATH = (
     / "deploy/grafana/dashboards/logyard/logyard-home.json"
 )
 MAX_NESTING = 64
+MAX_JSON_NODES = 65_536
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
 GRID_COLUMNS = 24
@@ -111,7 +112,7 @@ def read_asset(path):
         message = f"dashboard exceeds {MAX_ASSET_BYTES}-byte limit"
         require(info.st_size <= MAX_ASSET_BYTES, message)
         with os.fdopen(descriptor, "rb", closefd=False) as stream:
-            content = stream.read(MAX_ASSET_BYTES + 1)
+            content = stream.read(info.st_size + 1)
         require(len(content) <= MAX_ASSET_BYTES, message)
         final = os.fstat(descriptor)
         # Do not restat the path: an atomic replacement may leave us holding
@@ -415,6 +416,20 @@ def _walk_dashboard(dashboard):
 def validate_dashboard(dashboard):
     """Validate this asset's shape and references, not the Grafana/LogQL schema."""
     require(isinstance(dashboard, dict), "dashboard must be an object")
+
+    # Admit the entire decoded tree, including extensions, before semantic checks.
+    for count, (value, depth, _, key) in enumerate(_walk_dashboard(dashboard), start=1):
+        if count > MAX_JSON_NODES:
+            raise ValueError(f"dashboard node count exceeds {MAX_JSON_NODES}")
+        if ((isinstance(key, str) and SURROGATE.search(key))
+                or (isinstance(value, str) and SURROGATE.search(value))):
+            raise ValueError("dashboard text contains a Unicode surrogate")
+        if isinstance(value, (dict, list)):
+            require(depth <= MAX_NESTING,
+                    f"dashboard nesting exceeds {MAX_NESTING} container levels")
+        elif isinstance(value, float):
+            require(math.isfinite(value), "nonfinite JSON number")
+
     require(dashboard.get("uid") == "logyard-home", "expected uid logyard-home")
     require(isinstance(dashboard.get("title"), str) and dashboard["title"].strip(),
             "dashboard needs a title")
@@ -449,17 +464,6 @@ def validate_dashboard(dashboard):
             require(all_value is None or (isinstance(all_value, str) and all_value in ("", ".*")),
                     f"{display_name}: allValue must be empty or exactly .*")
     require({"host", "service", "level"} <= names, "host, service and level variables are required")
-
-    # Check JSON depth and scalars, including extensions, before recursive panel checks.
-    for value, depth, _, key in _walk_dashboard(dashboard):
-        if ((isinstance(key, str) and SURROGATE.search(key))
-                or (isinstance(value, str) and SURROGATE.search(value))):
-            raise ValueError("dashboard text contains a Unicode surrogate")
-        if isinstance(value, (dict, list)):
-            require(depth <= MAX_NESTING,
-                    f"dashboard nesting exceeds {MAX_NESTING} container levels")
-        elif isinstance(value, float):
-            require(math.isfinite(value), "nonfinite JSON number")
 
     query_fields = {(id(variable), "query") for variable in variables}
 

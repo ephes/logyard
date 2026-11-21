@@ -81,8 +81,8 @@ surrogate`. Paired escapes for supplementary characters are accepted. Inputs
 must be UTF-8 regular files of at most 1 MiB (1,048,576 bytes), inclusive.
 Symlinks to regular files are supported. The checker opens the path once,
 nonblocking where supported, checks the descriptor's type and size before
-reading, and reads at most the byte limit plus one byte to detect growth
-after the size check. Nonregular files, oversized assets and invalid UTF-8
+reading, and requests only the checked file size plus one byte to detect
+growth after the size check. Nonregular files, oversized assets and invalid UTF-8
 fail with exit 1 and a concise diagnostic.
 After reading, the checker compares the same descriptor's device, inode, size,
 nanosecond modification time and change time, and requires the consumed byte
@@ -251,9 +251,12 @@ JSON nesting is limited to 64 container levels, including extension objects and
 saved rows: the dashboard root object is level 1, each nested object or array adds
 one level, and scalar values add none. Excessive nesting during decoding or
 validation fails with exit 1 and a concise diagnostic instead of a traceback.
-Scalar and metadata reference checks walk the tree in separate depth-first
-passes. Each traversal keeps one pending iterator per open container, so its
-stack is bounded by nesting depth even for wide extension arrays and objects.
+After decoding, the structural pass allows at most 65,536 JSON nodes before
+query, panel and metadata reference checks run. The root object, each object
+member value and each array element count once, including extension values.
+The structural and metadata reference passes each keep one pending iterator
+per open container, so their stacks are bounded by nesting depth even for wide
+extension arrays and objects.
 CLI validation failures emit one ASCII diagnostic line of at most 1,024 bytes,
 including its final newline. Paths and scalar identifiers are escaped and
 clipped to bounded previews. Truncation adds an ellipsis after the last

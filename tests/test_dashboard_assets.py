@@ -772,6 +772,13 @@ class DashboardAdmissionTests(unittest.TestCase):
     def test_cli_rejects_invalid_utf8(self):
         self.assert_invalid(self.run_cli(b"\xff"), "utf-8")
 
+    def test_cli_rejects_excess_decoded_nodes_below_byte_limit(self):
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = [0] * 65_536
+        content = json.dumps(dashboard, separators=(",", ":")).encode("utf-8")
+        self.assertLess(len(content), self.BYTE_LIMIT)
+        self.assert_invalid(self.run_cli(content), "dashboard node count exceeds 65536")
+
     def test_rejects_lone_surrogates_in_extension_keys_and_values(self):
         diagnostic = "dashboard text contains a Unicode surrogate"
         for surrogate in ("\ud800", "\udfff"):
@@ -839,20 +846,32 @@ class DashboardAdmissionTests(unittest.TestCase):
                 reader.assert_not_called()
                 close.assert_called_once()
 
-    def test_actual_read_is_bounded_when_file_grows_after_stat(self):
+    def test_small_asset_read_requests_only_its_size_plus_one(self):
         content = json.dumps(synthetic_dashboard()).encode("utf-8")
-        oversized = content + b" " * (self.BYTE_LIMIT + 100 - len(content))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.json"
             path.write_bytes(content)
-            # The descriptor reports the initial size but now supplies more data.
-            with io.BytesIO(oversized) as stream, \
+            with io.BytesIO(content) as stream, \
                     patch.object(stream, "read", wraps=stream.read) as read, \
-                    patch("os.fdopen", return_value=stream), \
-                    patch("os.close", wraps=os.close) as close:
-                self.assert_invalid(self.run_main(path), "byte limit")
-                read.assert_called_once_with(self.BYTE_LIMIT + 1)
-                close.assert_called_once()
+                    patch("os.fdopen", return_value=stream):
+                result = self.run_main(path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                read.assert_called_once_with(len(content) + 1)
+
+    def test_actual_read_is_bounded_when_file_grows_after_stat(self):
+        content = json.dumps(synthetic_dashboard()).encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            for size, diagnostic in ((len(content), "dashboard changed while reading"),
+                                     (self.BYTE_LIMIT, "byte limit")):
+                with self.subTest(size=size):
+                    path.write_bytes(content.ljust(size, b" "))
+
+                    def append():
+                        with path.open("ab") as writer:
+                            writer.write(b"  ")
+
+                    self.assert_invalid(self.read_with_mutation(path, append), diagnostic)
 
     def read_with_mutation(self, path, mutate):
         real_fdopen = os.fdopen
@@ -1037,6 +1056,33 @@ class DashboardPanelBudgetTests(unittest.TestCase):
 
 
 class DashboardDepthTests(unittest.TestCase):
+    def test_node_budget_is_inclusive_and_stops_the_structural_walk(self):
+        limit = 65_536
+        dashboard = synthetic_dashboard()
+        dashboard["extension"] = {"entries": []}
+        walk = check_dashboard._walk_dashboard
+        base_nodes = sum(1 for _ in walk(dashboard))
+        entries = dashboard["extension"]["entries"]
+        entries.extend([None] * (limit - base_nodes))
+        validate_dashboard(dashboard)
+
+        entries.extend([None] * 10_000)
+        visited = 0
+
+        def count_nodes(dashboard):
+            nonlocal visited
+            for node in walk(dashboard):
+                visited += 1
+                yield node
+
+        with patch.object(check_dashboard, "_walk_dashboard", side_effect=count_nodes) as walker, \
+                patch.object(check_dashboard, "check_target_scope") as check_scope:
+            with self.assertRaisesRegex(ValueError, "^dashboard node count exceeds 65536$"):
+                validate_dashboard(dashboard)
+            walker.assert_called_once_with(dashboard)
+            check_scope.assert_not_called()
+        self.assertEqual(visited, limit + 1)
+
     def test_wide_extensions_use_bounded_traversal_memory(self):
         dashboard = synthetic_dashboard()
         dashboard["extension"] = {
