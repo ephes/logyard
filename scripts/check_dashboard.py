@@ -129,18 +129,18 @@ def read_asset(path):
 def without_query_comments(query):
     """Remove LogQL # comments while preserving quoted interpolation and newlines."""
     parts = []
-    index = 0
+    start = index = 0
     while index < len(query):
-        start = index
-        if query[index] in '"`':
+        char = query[index]
+        if char in '"`':
             index = skip_string(query, index)
-        elif query[index] == "#":
+        elif char == "#":
+            parts.append(query[start:index])
             end = query.find("\n", index)
-            index = len(query) if end == -1 else end
-            continue
+            start = index = len(query) if end == -1 else end
         else:
             index += 1
-        parts.append(query[start:index])
+    parts.append(query[start:])
     return "".join(parts)
 
 
