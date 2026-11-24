@@ -49,7 +49,9 @@ VARIABLE = re.compile(
 REFERENCE_SYNTAX = re.compile(r'["`#{\n$\[\]]')
 # One stream matcher: label, operator, and a double-quoted or backtick string.
 MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^`]*`)\s*')
-ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
+# Panel IDs in the provisioned logyard-home dashboard.
+ERROR_PANEL_IDS = {3, 9}
+ALL_LEVELS_PANEL_ID = 7
 SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
@@ -367,7 +369,8 @@ def check_variable_query_scope(variable, variable_names):
 
 def check_target_scope(panel, target, variable_names):
     """Enforce this asset's label policy, without parsing LogQL expressions."""
-    context = (f"panel {diagnostic_text(panel['id'])}: "
+    panel_id = panel["id"]
+    context = (f"panel {diagnostic_text(panel_id)}: "
                f"target {diagnostic_text(target['refId'])}: invalid query scope")
     query = target["expr"]
     references = variable_references(query)
@@ -378,11 +381,13 @@ def check_target_scope(panel, target, variable_names):
     required = {"source_type": ("=", r"journald")}
     for label in ("host", "service", "level"):
         required[label] = ("=~", selector_reference(label))
-    if panel["title"] in ERROR_PANELS:
+    error_only = panel_id in ERROR_PANEL_IDS
+    all_levels = panel_id == ALL_LEVELS_PANEL_ID
+    if error_only:
         required["level"] = ("=~", r"error\|critical\|alert\|emerg")
-    elif panel["title"] == "Log Volume by Level":
+    elif all_levels:
         del required["level"]
-    if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
+    if error_only or all_levels:
         # Grafana interpolates $level in comments too; a value with a newline
         # would end the comment, so comment references count here.
         if "level" in references:
@@ -390,7 +395,7 @@ def check_target_scope(panel, target, variable_names):
     for selector in selectors:
         matchers = selector_matchers(selector, context)
         require_scope_matchers(matchers, required, context)
-        if panel["title"] == "Log Volume by Level" and any(name == "level" for name, _, _ in matchers):
+        if all_levels and any(name == "level" for name, _, _ in matchers):
             raise ValueError(context + ": volume must compare all levels")
     check_scoped_interpolation(query, context)
 

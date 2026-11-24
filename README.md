@@ -118,9 +118,11 @@ contain `source_type="journald"`, `host=~"$host"` and `service=~"$service"`.
 Each required scope label must appear exactly once per selector in panel targets
 and the three filter dropdown queries, even if a repeated matcher is identical.
 Other labels can combine multiple matchers subject to the existing selector rules.
-Ordinary panels also require `level=~"$level"`. Only the two named error panels
-use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
-matchers to compare all levels. These exceptions cannot reference `$level`.
+Ordinary panels also require `level=~"$level"`. The error panels (IDs 3 and 9)
+require `level=~"error|critical|alert|emerg"`. Log Volume by Level (ID 7) must omit
+level matchers to compare all levels. These exceptions cannot reference `$level`.
+Keep those panel IDs when editing display titles so the query rules follow the
+same panels.
 Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
 `[[name]]` only inside double-quoted strings. All explicit formatters, including
 `:regex`, `:raw` and `:text`, are rejected, including in additional matchers

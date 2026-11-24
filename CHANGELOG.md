@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep the error-only and all-level query scope rules tied to stable panel IDs when titles change.
 - Reject dashboard panel IDs, schema versions and grid bottoms outside the browser-safe integer range.
 - Refuse dashboards with more than 65,536 decoded JSON nodes before semantic checks.
 - Size dashboard read requests to the checked file size plus one byte.

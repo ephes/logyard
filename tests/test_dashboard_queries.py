@@ -70,20 +70,20 @@ class DashboardQueryTests(unittest.TestCase):
     def setUpClass(cls):
         dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
         cls.queries = [
-            (panel["title"], target["expr"])
+            (panel, target["expr"])
             for panel, target in query_targets(dashboard["panels"])
         ]
 
     def test_filter_policy(self):
-        for title, query in self.queries:
-            with self.subTest(panel=title):
+        for panel, query in self.queries:
+            with self.subTest(panel=panel["title"]):
                 self.assertIn('source_type="journald"', query)
                 self.assertIn('host=~"$host"', query)
                 self.assertIn('service=~"$service"', query)
-                if title in ("Errors (15m)", "Errors and Critical Logs"):
+                if panel["id"] in (3, 9):
                     self.assertNotIn("$level", query)
                     self.assertIn('level=~"error|critical|alert|emerg"', query)
-                elif title == "Log Volume by Level":
+                elif panel["id"] == 7:
                     self.assertNotIn("$level", query)
                 else:
                     self.assertIn('level=~"$level"', query)
@@ -107,7 +107,8 @@ class DashboardQueryTests(unittest.TestCase):
             (".*", ".*", ".*", 8),
         ):
             variables = dict(host=host, service=service, level=level)
-            for title, query in self.queries:
+            for panel, query in self.queries:
+                title = panel["title"]
                 if title not in summaries:
                     continue
                 group = summaries[title]
@@ -590,18 +591,31 @@ class DashboardTargetScopeTests(unittest.TestCase):
         variable["query"] = variable["query"].replace("{", "{" + matchers, 1)
         validate_dashboard(dashboard)
 
-    def test_level_exceptions_cannot_follow_selected_or_fixed_other_levels(self):
-        for title in ("Errors (15m)", "Errors and Critical Logs", "Log Volume by Level"):
-            for value in ("$level", "info"):
-                with self.subTest(panel=title, value=value):
-                    dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
-                    panel = next(p for p in dashboard["panels"] if p["title"] == title)
-                    target = panel["targets"][0]
-                    expr = re.sub(r', level=~"[^"]*"', "", target["expr"])
-                    target["expr"] = expr.replace('service=~"$service"',
-                                                f'service=~"$service", level=~"{value}"')
-                    with self.assertRaisesRegex(ValueError, "scope"):
-                        validate_dashboard(dashboard)
+    def test_level_exceptions_follow_panel_ids_after_title_changes(self):
+        source = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        for panel_id, fixed_level_error in (
+            (3, "expected level filter"),
+            (9, "expected level filter"),
+            (7, "volume must compare all levels"),
+        ):
+            with self.subTest(panel_id=panel_id):
+                dashboard = copy.deepcopy(source)
+                panels = {panel["id"]: panel for panel in dashboard["panels"]}
+                panel = panels[panel_id]
+                ordinary = panels[2]
+                panel["title"], ordinary["title"] = ordinary["title"], panel["title"]
+                validate_dashboard(dashboard)
+
+                target = panel["targets"][0]
+                expr = re.sub(r', level=~"[^"]*"', "", target["expr"])
+                for value, error in (("$level", "unexpected level variable"), ("info", fixed_level_error)):
+                    with self.subTest(level=value):
+                        target["expr"] = expr.replace('service=~"$service"',
+                                                     f'service=~"$service", level=~"{value}"')
+                        with self.assertRaisesRegex(
+                            ValueError, f"panel {panel_id}: target .*: invalid query scope: {error}"
+                        ):
+                            validate_dashboard(dashboard)
 
     def test_scoped_helpers_and_multiple_selectors_remain_valid(self):
         dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
