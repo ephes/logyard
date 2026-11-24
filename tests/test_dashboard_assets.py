@@ -55,6 +55,23 @@ class DashboardAssetTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "panel id"):
                     validate_dashboard(dashboard)
 
+    def test_panel_ids_that_round_to_the_same_browser_number_are_rejected(self):
+        first_id = 2**53
+        second_id = first_id + 1
+        self.assertEqual(float(first_id), float(second_id))
+        self.dashboard["panels"][0]["id"] = first_id
+        self.dashboard["panels"][1]["id"] = second_id
+
+        with self.assertRaisesRegex(ValueError, "panel id"):
+            validate_dashboard(self.dashboard)
+
+    def test_schema_version_must_be_a_browser_safe_integer(self):
+        self.dashboard["schemaVersion"] = 2**53 - 1
+        validate_dashboard(self.dashboard)
+        self.dashboard["schemaVersion"] += 1
+        with self.assertRaisesRegex(ValueError, "schemaVersion"):
+            validate_dashboard(self.dashboard)
+
     def test_only_collapsed_rows_can_store_children(self):
         for kind, collapsed, children in (
             ("text", True, True), ("text", True, False),
@@ -118,6 +135,19 @@ class DashboardAssetTests(unittest.TestCase):
                 dashboard["panels"][0]["gridPos"] = value
                 with self.assertRaisesRegex(ValueError, "gridPos"):
                     validate_dashboard(dashboard)
+
+    def test_saved_row_grid_must_have_a_browser_safe_bottom(self):
+        limit = 2**53 - 1
+        child = dict(id=limit, title="Child", type="text",
+                     gridPos=dict(x=0, y=limit - 1, w=24, h=1))
+        self.dashboard["panels"].append(row([child]))
+        validate_dashboard(self.dashboard)
+
+        for y, h in ((limit - 1, 3), (limit + 1, 1), (0, limit + 1)):
+            with self.subTest(y=y, h=h):
+                child["gridPos"].update(y=y, h=h)
+                with self.assertRaisesRegex(ValueError, "gridPos"):
+                    validate_dashboard(self.dashboard)
 
     def test_collapsed_row_children_do_not_occupy_top_level_grid(self):
         child = copy.deepcopy(self.dashboard["panels"][0])

@@ -21,6 +21,7 @@ MAX_JSON_NODES = 65_536
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
 GRID_COLUMNS = 24
+MAX_SAFE_INTEGER = 2**53 - 1  # JavaScript Number.MAX_SAFE_INTEGER
 MAX_VARIABLES = 256
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
@@ -48,7 +49,9 @@ VARIABLE = re.compile(
 REFERENCE_SYNTAX = re.compile(r'["`#{\n$\[\]]')
 # One stream matcher: label, operator, and a double-quoted or backtick string.
 MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^`]*`)\s*')
-ERROR_PANELS = {"Errors (15m)", "Errors and Critical Logs"}
+# Panel IDs in the provisioned logyard-home dashboard.
+ERROR_PANEL_IDS = {3, 9}
+ALL_LEVELS_PANEL_ID = 7
 SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
@@ -366,7 +369,8 @@ def check_variable_query_scope(variable, variable_names):
 
 def check_target_scope(panel, target, variable_names):
     """Enforce this asset's label policy, without parsing LogQL expressions."""
-    context = (f"panel {diagnostic_text(panel['id'])}: "
+    panel_id = panel["id"]
+    context = (f"panel {diagnostic_text(panel_id)}: "
                f"target {diagnostic_text(target['refId'])}: invalid query scope")
     query = target["expr"]
     references = variable_references(query)
@@ -377,11 +381,13 @@ def check_target_scope(panel, target, variable_names):
     required = {"source_type": ("=", r"journald")}
     for label in ("host", "service", "level"):
         required[label] = ("=~", selector_reference(label))
-    if panel["title"] in ERROR_PANELS:
+    error_only = panel_id in ERROR_PANEL_IDS
+    all_levels = panel_id == ALL_LEVELS_PANEL_ID
+    if error_only:
         required["level"] = ("=~", r"error\|critical\|alert\|emerg")
-    elif panel["title"] == "Log Volume by Level":
+    elif all_levels:
         del required["level"]
-    if panel["title"] in ERROR_PANELS or panel["title"] == "Log Volume by Level":
+    if error_only or all_levels:
         # Grafana interpolates $level in comments too; a value with a newline
         # would end the comment, so comment references count here.
         if "level" in references:
@@ -389,7 +395,7 @@ def check_target_scope(panel, target, variable_names):
     for selector in selectors:
         matchers = selector_matchers(selector, context)
         require_scope_matchers(matchers, required, context)
-        if panel["title"] == "Log Volume by Level" and any(name == "level" for name, _, _ in matchers):
+        if all_levels and any(name == "level" for name, _, _ in matchers):
             raise ValueError(context + ": volume must compare all levels")
     check_scoped_interpolation(query, context)
 
@@ -434,7 +440,8 @@ def validate_dashboard(dashboard):
     require(isinstance(dashboard.get("title"), str) and dashboard["title"].strip(),
             "dashboard needs a title")
     version = dashboard.get("schemaVersion")
-    require(type(version) is int and version > 0, "schemaVersion must be a positive integer")
+    require(type(version) is int and 0 < version <= MAX_SAFE_INTEGER,
+            "schemaVersion must be a positive browser-safe integer")
     templating = dashboard.get("templating")
     require(isinstance(templating, dict), "templating must be an object")
     variables = templating.get("list")
@@ -486,7 +493,8 @@ def validate_dashboard(dashboard):
         for panel_index, panel in enumerate(panels):
             require(isinstance(panel, dict), "panel must be an object")
             panel_id = panel.get("id")
-            require(type(panel_id) is int and panel_id > 0 and panel_id not in panel_ids,
+            require(type(panel_id) is int and 0 < panel_id <= MAX_SAFE_INTEGER
+                    and panel_id not in panel_ids,
                     f"invalid or duplicate panel id at index {panel_index}")
             panel_ids.add(panel_id)
             panel_id = diagnostic_text(panel_id)
@@ -515,6 +523,8 @@ def validate_dashboard(dashboard):
             x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
             require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= GRID_COLUMNS,
                     f"panel {panel_id}: gridPos must fit the {GRID_COLUMNS}-column grid")
+            require(y <= MAX_SAFE_INTEGER and h <= MAX_SAFE_INTEGER - y,
+                    f"panel {panel_id}: gridPos bottom exceeds the browser-safe integer limit")
             if panel_type not in ("text", "row"):
                 require(panel.get("datasource") == LOKI,
                         f"panel {panel_id}: expected Loki datasource {LOKI}")

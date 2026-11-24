@@ -98,6 +98,8 @@ snapshot or detect every possible write on filesystems with coarse timestamps.
 It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
+Panel IDs and `schemaVersion` must be positive browser-safe integers, at most
+9,007,199,254,740,991 (JavaScript's `Number.MAX_SAFE_INTEGER`).
 Each target `refId` must be nonempty and use its stripped spelling, with no
 leading or trailing whitespace. Different panels may reuse a target `refId`.
 The duplicate check compares full references and builds a bounded preview only
@@ -116,9 +118,11 @@ contain `source_type="journald"`, `host=~"$host"` and `service=~"$service"`.
 Each required scope label must appear exactly once per selector in panel targets
 and the three filter dropdown queries, even if a repeated matcher is identical.
 Other labels can combine multiple matchers subject to the existing selector rules.
-Ordinary panels also require `level=~"$level"`. Only the two named error panels
-use `level=~"error|critical|alert|emerg"`; Log Volume by Level must omit level
-matchers to compare all levels. These exceptions cannot reference `$level`.
+Ordinary panels also require `level=~"$level"`. The error panels (IDs 3 and 9)
+require `level=~"error|critical|alert|emerg"`. Log Volume by Level (ID 7) must omit
+level matchers to compare all levels. These exceptions cannot reference `$level`.
+Keep those panel IDs when editing display titles so the query rules follow the
+same panels.
 Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
 `[[name]]` only inside double-quoted strings. All explicit formatters, including
 `:regex`, `:raw` and `:text`, are rejected, including in additional matchers
@@ -192,7 +196,8 @@ variable dependencies and references in display metadata remain supported.
 The required dropdown parent scope is specific to the three filters.
 All panels, including saved children in nested collapsed rows, must have
 positive-size integer `gridPos` rectangles with nonnegative coordinates within
-Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
+Grafana's 24-column grid. The bottom edge (`y + h`) must also stay within the
+browser-safe integer limit. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
 Within each collapsed row, saved siblings must not overlap each other; touching
