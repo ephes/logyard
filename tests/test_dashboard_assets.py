@@ -33,6 +33,49 @@ class DashboardAssetTests(unittest.TestCase):
     def test_committed_dashboard(self):
         validate_dashboard(self.dashboard)
 
+    def test_builtin_annotation_requires_grafana_datasource_object(self):
+        annotation = self.dashboard["annotations"]["list"][0]
+        for datasource in (
+            {"type": "loki", "uid": "logyard-loki"},
+            {"type": "grafana", "uid": "other"},
+            {"type": "loki", "uid": "-- Grafana --"},
+            "-- Grafana --",
+            None,
+        ):
+            with self.subTest(datasource=datasource):
+                annotation["datasource"] = datasource
+                with self.assertRaisesRegex(ValueError, "annotation 0: expected built-in Grafana datasource"):
+                    validate_dashboard(self.dashboard)
+
+    def test_unvalidated_annotation_queries_must_be_explicitly_disabled(self):
+        annotations = self.dashboard["annotations"]
+        extra = dict(
+            name="Synthetic", hide=True, enable=False,
+            datasource={"type": "loki", "uid": "logyard-loki"},
+        )
+        annotations["list"].append(extra)
+        annotations["list"][0]["description"] = "Annotations for $host"
+        annotations["options"] = {"threshold": 1.25}
+        validate_dashboard(self.dashboard)
+
+        extra["enable"] = True
+        with self.assertRaisesRegex(ValueError, "annotation 1: additional queries must be disabled"):
+            validate_dashboard(self.dashboard)
+        del extra["enable"]
+        with self.assertRaisesRegex(ValueError, "annotation 1: additional queries must be disabled"):
+            validate_dashboard(self.dashboard)
+
+        # A visible toggle lets viewers enable the unvalidated query.
+        extra["enable"] = False
+        for hide in (False, None):
+            with self.subTest(hide=hide):
+                if hide is None:
+                    extra.pop("hide", None)
+                else:
+                    extra["hide"] = hide
+                with self.assertRaisesRegex(ValueError, "annotation 1: additional queries must hide their toggle"):
+                    validate_dashboard(self.dashboard)
+
     def test_invalid_shapes(self):
         for key, value in (
             ("panels", {}), ("panels", []), ("templating", {}),
@@ -260,6 +303,48 @@ class DashboardAssetTests(unittest.TestCase):
             dict(id=1, title="Text", type="text", gridPos=dict(x=0, y=0, w=24, h=2)),
             row([]),
         ]
+        validate_dashboard(self.dashboard)
+
+    def test_specialized_panel_ids_require_query_panels_including_rows(self):
+        for panel_id, mode in ((3, "instant"), (7, "range"), (9, "range")):
+            for panel_type in ("text", "row"):
+                for nested in (False, True):
+                    with self.subTest(panel_id=panel_id, panel_type=panel_type, nested=nested):
+                        dashboard = copy.deepcopy(self.dashboard)
+                        panels = dashboard["panels"]
+                        index = next(i for i, panel in enumerate(panels) if panel["id"] == panel_id)
+                        original = panels[index]
+                        replacement = dict(
+                            id=panel_id, title="Renamed", type=panel_type, gridPos=original["gridPos"],
+                        )
+                        if panel_type == "row":
+                            replacement["collapsed"] = False
+                        if nested:
+                            panels.pop(index)
+                            panels.append(row([replacement]))
+                        else:
+                            panels[index] = replacement
+                        with self.assertRaisesRegex(
+                            ValueError, f"panel {panel_id}: requires a query panel with {mode} targets",
+                        ):
+                            validate_dashboard(dashboard)
+
+    def test_specialized_panel_ids_require_their_query_modes(self):
+        panel = next(panel for panel in self.dashboard["panels"] if panel["id"] == 3)
+        panel["type"] = "timeseries"
+        for target in panel["targets"]:
+            target["queryType"] = "range"
+        with self.assertRaisesRegex(ValueError, "panel 3: requires a query panel with instant targets"):
+            validate_dashboard(self.dashboard)
+
+    def test_specialized_query_panels_can_be_renamed_and_nested(self):
+        panels = self.dashboard["panels"]
+        index = next(i for i, panel in enumerate(panels) if panel["id"] == 7)
+        panel = panels[index]
+        panel["title"] = "Renamed"
+        validate_dashboard(self.dashboard)
+        panels.pop(index)
+        panels.append(row([panel]))
         validate_dashboard(self.dashboard)
 
     def test_misplaced_targets_are_rejected_on_nested_rows(self):
@@ -1016,7 +1101,8 @@ class DashboardPanelBudgetTests(unittest.TestCase):
         dashboard["panels"] = []
         for index in range(count):
             panel = copy.deepcopy(prototype)
-            panel.update(id=index + 1, gridPos=dict(x=0, y=index, w=1, h=1))
+            # Keep synthetic text panels clear of the provisioned query roles.
+            panel.update(id=1000 + index, gridPos=dict(x=0, y=index, w=1, h=1))
             dashboard["panels"].append(panel)
         return dashboard
 
@@ -1042,7 +1128,7 @@ class DashboardPanelBudgetTests(unittest.TestCase):
 
         panels = dashboard["panels"]
         panels[-1]["gridPos"]["y"] = panels[-2]["gridPos"]["y"]
-        with self.assertRaisesRegex(ValueError, r"^panels 255 and 256 overlap$"):
+        with self.assertRaisesRegex(ValueError, r"^panels 1254 and 1255 overlap$"):
             validate_dashboard(dashboard)
 
     def test_tall_single_column_layout_limits_comparisons(self):

@@ -121,8 +121,9 @@ Other labels can combine multiple matchers subject to the existing selector rule
 Ordinary panels also require `level=~"$level"`. The error panels (IDs 3 and 9)
 require `level=~"error|critical|alert|emerg"`. Log Volume by Level (ID 7) must omit
 level matchers to compare all levels. These exceptions cannot reference `$level`.
-Keep those panel IDs when editing display titles so the query rules follow the
-same panels.
+When present, these IDs must belong to supported query panels. ID 3 requires
+`instant` targets, while IDs 7 and 9 require `range` targets. These roles follow
+the panel IDs through title changes and moves into collapsed rows.
 Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
 `[[name]]` only inside double-quoted strings. All explicit formatters, including
 `:regex`, `:raw` and `:text`, are rejected, including in additional matchers
@@ -216,8 +217,14 @@ the IDs of the first colliding pair in their original sibling order.
 Dashboards may contain at most 256 variables in total, including the three
 required dropdowns. The checker enforces this budget before inspecting any
 query text or building the variable dependency graph.
-Grafana's built-in annotation datasource is separate from
-the Loki query datasource. The check accepts `$name`, `${name:format}` and
+If present, `annotations.list` must contain annotation objects. The built-in
+record (`builtIn: 1`) may appear once and must have type `dashboard` with
+datasource `{"type": "grafana", "uid": "-- Grafana --"}`. Additional annotation
+queries must set both `enable: false` and `hide: true` until the checker
+supports their query contract: a visible toggle would let any viewer run the
+unvalidated query. Both flags must be booleans when present. Display metadata still follows the ordinary reference
+checks.
+The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
 Reference matching follows Grafana's variable pattern: ASCII names (as in
 JavaScript, so `$hostä` refers to `host`), `[[name:format]]` only with a word

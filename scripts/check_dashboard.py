@@ -25,6 +25,7 @@ MAX_SAFE_INTEGER = 2**53 - 1  # JavaScript Number.MAX_SAFE_INTEGER
 MAX_VARIABLES = 256
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
+GRAFANA = {"type": "grafana", "uid": "-- Grafana --"}
 QUERY_MODES = {"stat": "instant", "bargauge": "instant",
                "logs": "range", "timeseries": "range"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
@@ -52,6 +53,7 @@ MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^
 # Panel IDs in the provisioned logyard-home dashboard.
 ERROR_PANEL_IDS = {3, 9}
 ALL_LEVELS_PANEL_ID = 7
+SPECIALIZED_PANEL_MODES = {3: "instant", ALL_LEVELS_PANEL_ID: "range", 9: "range"}
 SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
@@ -419,6 +421,35 @@ def _walk_dashboard(dashboard):
             stack.append((id(value), children))
 
 
+def check_annotations(annotations):
+    require(isinstance(annotations, dict), "annotations must be an object")
+    entries = annotations.get("list", [])
+    require(isinstance(entries, list), "annotations.list must be a list")
+    seen_builtin = False
+    for index, annotation in enumerate(entries):
+        context = f"annotation {index}"
+        require(isinstance(annotation, dict), f"{context}: expected an object")
+        builtin = annotation.get("builtIn", 0)
+        require(type(builtin) is int and builtin in (0, 1),
+                f"{context}: builtIn must be 0 or 1")
+        for flag in ("enable", "hide"):
+            require(flag not in annotation or type(annotation[flag]) is bool,
+                    f"{context}: {flag} must be a boolean")
+        if builtin == 1:
+            require(not seen_builtin, f"{context}: duplicate built-in annotation")
+            seen_builtin = True
+            require(annotation.get("type") == "dashboard",
+                    f"{context}: expected built-in dashboard annotation")
+            require(annotation.get("datasource") == GRAFANA,
+                    f"{context}: expected built-in Grafana datasource {GRAFANA}")
+        else:
+            require(annotation.get("enable") is False,
+                    f"{context}: additional queries must be disabled")
+            # A visible toggle would let any viewer run the unvalidated query.
+            require(annotation.get("hide") is True,
+                    f"{context}: additional queries must hide their toggle")
+
+
 def validate_dashboard(dashboard):
     """Validate this asset's shape and references, not the Grafana/LogQL schema."""
     require(isinstance(dashboard, dict), "dashboard must be an object")
@@ -442,6 +473,7 @@ def validate_dashboard(dashboard):
     version = dashboard.get("schemaVersion")
     require(type(version) is int and 0 < version <= MAX_SAFE_INTEGER,
             "schemaVersion must be a positive browser-safe integer")
+    check_annotations(dashboard.get("annotations", {}))
     templating = dashboard.get("templating")
     require(isinstance(templating, dict), "templating must be an object")
     variables = templating.get("list")
@@ -497,6 +529,7 @@ def validate_dashboard(dashboard):
                     and panel_id not in panel_ids,
                     f"invalid or duplicate panel id at index {panel_index}")
             panel_ids.add(panel_id)
+            role_mode = SPECIALIZED_PANEL_MODES.get(panel_id)
             panel_id = diagnostic_text(panel_id)
             require(len(panel_ids) <= MAX_PANELS,
                     f"panel count exceeds {MAX_PANELS}")
@@ -504,6 +537,10 @@ def validate_dashboard(dashboard):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
             panel_type = panel["type"]
+            expected_mode = QUERY_MODES.get(panel_type)
+            if role_mode is not None:
+                require(expected_mode == role_mode,
+                        f"panel {panel_id}: requires a query panel with {role_mode} targets")
             if panel_type == "row":
                 require(type(panel.get("collapsed")) is bool,
                         f"panel {panel_id}: row collapsed must be a boolean")
@@ -554,9 +591,8 @@ def validate_dashboard(dashboard):
                     mode = target.get("queryType")
                     require(mode in ("instant", "range"),
                             f"panel {panel_id}: target queryType must be instant or range")
-                    expected_mode = QUERY_MODES.get(panel["type"])
                     require(expected_mode is None or mode == expected_mode,
-                            f"panel {panel_id}: {diagnostic_text(panel['type'])} target queryType must be {expected_mode}")
+                            f"panel {panel_id}: {diagnostic_text(panel_type)} target queryType must be {expected_mode}")
                     check_target_scope(panel, target, names)
                 require(any(not target.get("hide", False) for target in targets),
                         f"panel {panel_id}: needs at least one visible target")

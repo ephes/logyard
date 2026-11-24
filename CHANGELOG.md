@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Validate the built-in dashboard annotation's Grafana datasource and require
+  additional annotation queries to be explicitly disabled with a hidden toggle.
+- Require the specialized dashboard panel IDs to retain query panels with their
+  provisioned instant or range targets, including inside collapsed rows.
 - Keep the error-only and all-level query scope rules tied to stable panel IDs when titles change.
 - Reject dashboard panel IDs, schema versions and grid bottoms outside the browser-safe integer range.
 - Refuse dashboards with more than 65,536 decoded JSON nodes before semantic checks.
