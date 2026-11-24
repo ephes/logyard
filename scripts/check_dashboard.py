@@ -445,6 +445,9 @@ def check_annotations(annotations):
         else:
             require(annotation.get("enable") is False,
                     f"{context}: additional queries must be disabled")
+            # A visible toggle would let any viewer run the unvalidated query.
+            require(annotation.get("hide") is True,
+                    f"{context}: additional queries must hide their toggle")
 
 
 def validate_dashboard(dashboard):

@@ -220,9 +220,9 @@ query text or building the variable dependency graph.
 If present, `annotations.list` must contain annotation objects. The built-in
 record (`builtIn: 1`) may appear once and must have type `dashboard` with
 datasource `{"type": "grafana", "uid": "-- Grafana --"}`. Additional annotation
-queries must set `enable: false` until the checker supports their query
-contract. Setting `hide: true` only hides the toggle. Both flags must be
-booleans when present. Display metadata still follows the ordinary reference
+queries must set both `enable: false` and `hide: true` until the checker
+supports their query contract: a visible toggle would let any viewer run the
+unvalidated query. Both flags must be booleans when present. Display metadata still follows the ordinary reference
 checks.
 The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.

@@ -65,6 +65,17 @@ class DashboardAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "annotation 1: additional queries must be disabled"):
             validate_dashboard(self.dashboard)
 
+        # A visible toggle lets viewers enable the unvalidated query.
+        extra["enable"] = False
+        for hide in (False, None):
+            with self.subTest(hide=hide):
+                if hide is None:
+                    extra.pop("hide", None)
+                else:
+                    extra["hide"] = hide
+                with self.assertRaisesRegex(ValueError, "annotation 1: additional queries must hide their toggle"):
+                    validate_dashboard(self.dashboard)
+
     def test_invalid_shapes(self):
         for key, value in (
             ("panels", {}), ("panels", []), ("templating", {}),
