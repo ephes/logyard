@@ -21,6 +21,7 @@ MAX_JSON_NODES = 65_536
 MAX_ASSET_BYTES = 1024 * 1024
 MAX_PANELS = 256
 GRID_COLUMNS = 24
+MAX_SAFE_INTEGER = 2**53 - 1  # JavaScript Number.MAX_SAFE_INTEGER
 MAX_VARIABLES = 256
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
@@ -434,7 +435,8 @@ def validate_dashboard(dashboard):
     require(isinstance(dashboard.get("title"), str) and dashboard["title"].strip(),
             "dashboard needs a title")
     version = dashboard.get("schemaVersion")
-    require(type(version) is int and version > 0, "schemaVersion must be a positive integer")
+    require(type(version) is int and 0 < version <= MAX_SAFE_INTEGER,
+            "schemaVersion must be a positive browser-safe integer")
     templating = dashboard.get("templating")
     require(isinstance(templating, dict), "templating must be an object")
     variables = templating.get("list")
@@ -486,7 +488,8 @@ def validate_dashboard(dashboard):
         for panel_index, panel in enumerate(panels):
             require(isinstance(panel, dict), "panel must be an object")
             panel_id = panel.get("id")
-            require(type(panel_id) is int and panel_id > 0 and panel_id not in panel_ids,
+            require(type(panel_id) is int and 0 < panel_id <= MAX_SAFE_INTEGER
+                    and panel_id not in panel_ids,
                     f"invalid or duplicate panel id at index {panel_index}")
             panel_ids.add(panel_id)
             panel_id = diagnostic_text(panel_id)
@@ -515,6 +518,8 @@ def validate_dashboard(dashboard):
             x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
             require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= GRID_COLUMNS,
                     f"panel {panel_id}: gridPos must fit the {GRID_COLUMNS}-column grid")
+            require(y <= MAX_SAFE_INTEGER and h <= MAX_SAFE_INTEGER - y,
+                    f"panel {panel_id}: gridPos bottom exceeds the browser-safe integer limit")
             if panel_type not in ("text", "row"):
                 require(panel.get("datasource") == LOKI,
                         f"panel {panel_id}: expected Loki datasource {LOKI}")

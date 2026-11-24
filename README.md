@@ -98,6 +98,8 @@ snapshot or detect every possible write on filesystems with coarse timestamps.
 It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
+Panel IDs and `schemaVersion` must be positive browser-safe integers, at most
+9,007,199,254,740,991 (JavaScript's `Number.MAX_SAFE_INTEGER`).
 Each target `refId` must be nonempty and use its stripped spelling, with no
 leading or trailing whitespace. Different panels may reuse a target `refId`.
 The duplicate check compares full references and builds a bounded preview only
@@ -192,7 +194,8 @@ variable dependencies and references in display metadata remain supported.
 The required dropdown parent scope is specific to the three filters.
 All panels, including saved children in nested collapsed rows, must have
 positive-size integer `gridPos` rectangles with nonnegative coordinates within
-Grafana's 24-column grid. Top-level panels cannot overlap; touching edges are
+Grafana's 24-column grid. The bottom edge (`y + h`) must also stay within the
+browser-safe integer limit. Top-level panels cannot overlap; touching edges are
 allowed. Row headers occupy that grid, while saved children inside collapsed
 rows are excluded from top-level overlap checks and may overlap the row header.
 Within each collapsed row, saved siblings must not overlap each other; touching
