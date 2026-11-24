@@ -25,6 +25,7 @@ MAX_SAFE_INTEGER = 2**53 - 1  # JavaScript Number.MAX_SAFE_INTEGER
 MAX_VARIABLES = 256
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
+GRAFANA = {"type": "grafana", "uid": "-- Grafana --"}
 QUERY_MODES = {"stat": "instant", "bargauge": "instant",
                "logs": "range", "timeseries": "range"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
@@ -419,6 +420,32 @@ def _walk_dashboard(dashboard):
             stack.append((id(value), children))
 
 
+def check_annotations(annotations):
+    require(isinstance(annotations, dict), "annotations must be an object")
+    entries = annotations.get("list", [])
+    require(isinstance(entries, list), "annotations.list must be a list")
+    seen_builtin = False
+    for index, annotation in enumerate(entries):
+        context = f"annotation {index}"
+        require(isinstance(annotation, dict), f"{context}: expected an object")
+        builtin = annotation.get("builtIn", 0)
+        require(type(builtin) is int and builtin in (0, 1),
+                f"{context}: builtIn must be 0 or 1")
+        for flag in ("enable", "hide"):
+            require(flag not in annotation or type(annotation[flag]) is bool,
+                    f"{context}: {flag} must be a boolean")
+        if builtin == 1:
+            require(not seen_builtin, f"{context}: duplicate built-in annotation")
+            seen_builtin = True
+            require(annotation.get("type") == "dashboard",
+                    f"{context}: expected built-in dashboard annotation")
+            require(annotation.get("datasource") == GRAFANA,
+                    f"{context}: expected built-in Grafana datasource {GRAFANA}")
+        else:
+            require(annotation.get("enable") is False,
+                    f"{context}: additional queries must be disabled")
+
+
 def validate_dashboard(dashboard):
     """Validate this asset's shape and references, not the Grafana/LogQL schema."""
     require(isinstance(dashboard, dict), "dashboard must be an object")
@@ -442,6 +469,7 @@ def validate_dashboard(dashboard):
     version = dashboard.get("schemaVersion")
     require(type(version) is int and 0 < version <= MAX_SAFE_INTEGER,
             "schemaVersion must be a positive browser-safe integer")
+    check_annotations(dashboard.get("annotations", {}))
     templating = dashboard.get("templating")
     require(isinstance(templating, dict), "templating must be an object")
     variables = templating.get("list")

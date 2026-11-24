@@ -216,8 +216,14 @@ the IDs of the first colliding pair in their original sibling order.
 Dashboards may contain at most 256 variables in total, including the three
 required dropdowns. The checker enforces this budget before inspecting any
 query text or building the variable dependency graph.
-Grafana's built-in annotation datasource is separate from
-the Loki query datasource. The check accepts `$name`, `${name:format}` and
+If present, `annotations.list` must contain annotation objects. The built-in
+record (`builtIn: 1`) may appear once and must have type `dashboard` with
+datasource `{"type": "grafana", "uid": "-- Grafana --"}`. Additional annotation
+queries must set `enable: false` until the checker supports their query
+contract. Setting `hide: true` only hides the toggle. Both flags must be
+booleans when present. Display metadata still follows the ordinary reference
+checks.
+The check accepts `$name`, `${name:format}` and
 `[[name]]` references plus an explicit allowlist of Grafana/Loki globals.
 Reference matching follows Grafana's variable pattern: ASCII names (as in
 JavaScript, so `$hostä` refers to `host`), `[[name:format]]` only with a word

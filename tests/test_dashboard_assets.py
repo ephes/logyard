@@ -33,6 +33,38 @@ class DashboardAssetTests(unittest.TestCase):
     def test_committed_dashboard(self):
         validate_dashboard(self.dashboard)
 
+    def test_builtin_annotation_requires_grafana_datasource_object(self):
+        annotation = self.dashboard["annotations"]["list"][0]
+        for datasource in (
+            {"type": "loki", "uid": "logyard-loki"},
+            {"type": "grafana", "uid": "other"},
+            {"type": "loki", "uid": "-- Grafana --"},
+            "-- Grafana --",
+            None,
+        ):
+            with self.subTest(datasource=datasource):
+                annotation["datasource"] = datasource
+                with self.assertRaisesRegex(ValueError, "annotation 0: expected built-in Grafana datasource"):
+                    validate_dashboard(self.dashboard)
+
+    def test_unvalidated_annotation_queries_must_be_explicitly_disabled(self):
+        annotations = self.dashboard["annotations"]
+        extra = dict(
+            name="Synthetic", hide=True, enable=False,
+            datasource={"type": "loki", "uid": "logyard-loki"},
+        )
+        annotations["list"].append(extra)
+        annotations["list"][0]["description"] = "Annotations for $host"
+        annotations["options"] = {"threshold": 1.25}
+        validate_dashboard(self.dashboard)
+
+        extra["enable"] = True
+        with self.assertRaisesRegex(ValueError, "annotation 1: additional queries must be disabled"):
+            validate_dashboard(self.dashboard)
+        del extra["enable"]
+        with self.assertRaisesRegex(ValueError, "annotation 1: additional queries must be disabled"):
+            validate_dashboard(self.dashboard)
+
     def test_invalid_shapes(self):
         for key, value in (
             ("panels", {}), ("panels", []), ("templating", {}),
