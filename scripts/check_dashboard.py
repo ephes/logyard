@@ -53,6 +53,7 @@ MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^
 # Panel IDs in the provisioned logyard-home dashboard.
 ERROR_PANEL_IDS = {3, 9}
 ALL_LEVELS_PANEL_ID = 7
+SPECIALIZED_PANEL_MODES = {3: "instant", ALL_LEVELS_PANEL_ID: "range", 9: "range"}
 SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
@@ -525,6 +526,7 @@ def validate_dashboard(dashboard):
                     and panel_id not in panel_ids,
                     f"invalid or duplicate panel id at index {panel_index}")
             panel_ids.add(panel_id)
+            role_mode = SPECIALIZED_PANEL_MODES.get(panel_id)
             panel_id = diagnostic_text(panel_id)
             require(len(panel_ids) <= MAX_PANELS,
                     f"panel count exceeds {MAX_PANELS}")
@@ -532,6 +534,10 @@ def validate_dashboard(dashboard):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
             panel_type = panel["type"]
+            expected_mode = QUERY_MODES.get(panel_type)
+            if role_mode is not None:
+                require(expected_mode == role_mode,
+                        f"panel {panel_id}: requires a query panel with {role_mode} targets")
             if panel_type == "row":
                 require(type(panel.get("collapsed")) is bool,
                         f"panel {panel_id}: row collapsed must be a boolean")
@@ -582,9 +588,8 @@ def validate_dashboard(dashboard):
                     mode = target.get("queryType")
                     require(mode in ("instant", "range"),
                             f"panel {panel_id}: target queryType must be instant or range")
-                    expected_mode = QUERY_MODES.get(panel["type"])
                     require(expected_mode is None or mode == expected_mode,
-                            f"panel {panel_id}: {diagnostic_text(panel['type'])} target queryType must be {expected_mode}")
+                            f"panel {panel_id}: {diagnostic_text(panel_type)} target queryType must be {expected_mode}")
                     check_target_scope(panel, target, names)
                 require(any(not target.get("hide", False) for target in targets),
                         f"panel {panel_id}: needs at least one visible target")

@@ -294,6 +294,48 @@ class DashboardAssetTests(unittest.TestCase):
         ]
         validate_dashboard(self.dashboard)
 
+    def test_specialized_panel_ids_require_query_panels_including_rows(self):
+        for panel_id, mode in ((3, "instant"), (7, "range"), (9, "range")):
+            for panel_type in ("text", "row"):
+                for nested in (False, True):
+                    with self.subTest(panel_id=panel_id, panel_type=panel_type, nested=nested):
+                        dashboard = copy.deepcopy(self.dashboard)
+                        panels = dashboard["panels"]
+                        index = next(i for i, panel in enumerate(panels) if panel["id"] == panel_id)
+                        original = panels[index]
+                        replacement = dict(
+                            id=panel_id, title="Renamed", type=panel_type, gridPos=original["gridPos"],
+                        )
+                        if panel_type == "row":
+                            replacement["collapsed"] = False
+                        if nested:
+                            panels.pop(index)
+                            panels.append(row([replacement]))
+                        else:
+                            panels[index] = replacement
+                        with self.assertRaisesRegex(
+                            ValueError, f"panel {panel_id}: requires a query panel with {mode} targets",
+                        ):
+                            validate_dashboard(dashboard)
+
+    def test_specialized_panel_ids_require_their_query_modes(self):
+        panel = next(panel for panel in self.dashboard["panels"] if panel["id"] == 3)
+        panel["type"] = "timeseries"
+        for target in panel["targets"]:
+            target["queryType"] = "range"
+        with self.assertRaisesRegex(ValueError, "panel 3: requires a query panel with instant targets"):
+            validate_dashboard(self.dashboard)
+
+    def test_specialized_query_panels_can_be_renamed_and_nested(self):
+        panels = self.dashboard["panels"]
+        index = next(i for i, panel in enumerate(panels) if panel["id"] == 7)
+        panel = panels[index]
+        panel["title"] = "Renamed"
+        validate_dashboard(self.dashboard)
+        panels.pop(index)
+        panels.append(row([panel]))
+        validate_dashboard(self.dashboard)
+
     def test_misplaced_targets_are_rejected_on_nested_rows(self):
         dashboard = copy.deepcopy(self.dashboard)
         panels = dashboard["panels"]
@@ -1048,7 +1090,8 @@ class DashboardPanelBudgetTests(unittest.TestCase):
         dashboard["panels"] = []
         for index in range(count):
             panel = copy.deepcopy(prototype)
-            panel.update(id=index + 1, gridPos=dict(x=0, y=index, w=1, h=1))
+            # Keep synthetic text panels clear of the provisioned query roles.
+            panel.update(id=1000 + index, gridPos=dict(x=0, y=index, w=1, h=1))
             dashboard["panels"].append(panel)
         return dashboard
 
@@ -1074,7 +1117,7 @@ class DashboardPanelBudgetTests(unittest.TestCase):
 
         panels = dashboard["panels"]
         panels[-1]["gridPos"]["y"] = panels[-2]["gridPos"]["y"]
-        with self.assertRaisesRegex(ValueError, r"^panels 255 and 256 overlap$"):
+        with self.assertRaisesRegex(ValueError, r"^panels 1254 and 1255 overlap$"):
             validate_dashboard(dashboard)
 
     def test_tall_single_column_layout_limits_comparisons(self):
