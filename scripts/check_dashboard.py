@@ -53,7 +53,7 @@ MATCHER = re.compile(r'\s*([A-Za-z_]\w*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*"|`[^
 # Panel IDs in the provisioned logyard-home dashboard.
 ERROR_PANEL_IDS = {3, 9}
 ALL_LEVELS_PANEL_ID = 7
-SPECIALIZED_PANEL_MODES = {3: "instant", ALL_LEVELS_PANEL_ID: "range", 9: "range"}
+SPECIALIZED_PANEL_TYPES = {3: "stat", ALL_LEVELS_PANEL_ID: "timeseries", 9: "logs"}
 SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
@@ -529,7 +529,7 @@ def validate_dashboard(dashboard):
                     and panel_id not in panel_ids,
                     f"invalid or duplicate panel id at index {panel_index}")
             panel_ids.add(panel_id)
-            role_mode = SPECIALIZED_PANEL_MODES.get(panel_id)
+            required_type = SPECIALIZED_PANEL_TYPES.get(panel_id)
             panel_id = diagnostic_text(panel_id)
             require(len(panel_ids) <= MAX_PANELS,
                     f"panel count exceeds {MAX_PANELS}")
@@ -537,10 +537,10 @@ def validate_dashboard(dashboard):
                 require(isinstance(panel.get(key), str) and panel[key].strip(),
                         f"panel {panel_id}: missing {key}")
             panel_type = panel["type"]
+            if required_type is not None:
+                require(panel_type == required_type,
+                        f"panel {panel_id}: requires type {required_type}")
             expected_mode = QUERY_MODES.get(panel_type)
-            if role_mode is not None:
-                require(expected_mode == role_mode,
-                        f"panel {panel_id}: requires a query panel with {role_mode} targets")
             if panel_type == "row":
                 require(type(panel.get("collapsed")) is bool,
                         f"panel {panel_id}: row collapsed must be a boolean")
@@ -628,7 +628,7 @@ def validate_dashboard(dashboard):
                         f"and {diagnostic_text(siblings[second]['id'])} overlap"
                     )
 
-    for panel_id in SPECIALIZED_PANEL_MODES:
+    for panel_id in SPECIALIZED_PANEL_TYPES:
         require(panel_id in panel_ids, f"missing required panel {panel_id}")
 
     dependencies = {

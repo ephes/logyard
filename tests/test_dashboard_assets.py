@@ -315,7 +315,7 @@ class DashboardAssetTests(unittest.TestCase):
         validate_dashboard(self.dashboard)
 
     def test_specialized_panel_ids_require_query_panels_including_rows(self):
-        for panel_id, mode in ((3, "instant"), (7, "range"), (9, "range")):
+        for panel_id, expected_type in ((3, "stat"), (7, "timeseries"), (9, "logs")):
             for panel_type in ("text", "row"):
                 for nested in (False, True):
                     with self.subTest(panel_id=panel_id, panel_type=panel_type, nested=nested):
@@ -334,17 +334,29 @@ class DashboardAssetTests(unittest.TestCase):
                         else:
                             panels[index] = replacement
                         with self.assertRaisesRegex(
-                            ValueError, f"panel {panel_id}: requires a query panel with {mode} targets",
+                            ValueError, f"panel {panel_id}: requires type {expected_type}$",
                         ):
                             validate_dashboard(dashboard)
 
     def test_specialized_panel_ids_require_their_query_modes(self):
         panel = next(panel for panel in self.dashboard["panels"] if panel["id"] == 3)
-        panel["type"] = "timeseries"
         for target in panel["targets"]:
             target["queryType"] = "range"
-        with self.assertRaisesRegex(ValueError, "panel 3: requires a query panel with instant targets"):
+        with self.assertRaisesRegex(ValueError, "panel 3: stat target queryType must be instant"):
             validate_dashboard(self.dashboard)
+
+    def test_specialized_panel_ids_reject_other_types_with_the_same_query_mode(self):
+        for panel_id, expected_type, replacement in (
+            (3, "stat", "bargauge"),
+            (7, "timeseries", "logs"),
+            (9, "logs", "timeseries"),
+        ):
+            with self.subTest(panel_id=panel_id, replacement=replacement):
+                dashboard = copy.deepcopy(self.dashboard)
+                panel = next(panel for panel in dashboard["panels"] if panel["id"] == panel_id)
+                panel["type"] = replacement
+                with self.assertRaisesRegex(ValueError, f"panel {panel_id}: requires type {expected_type}$"):
+                    validate_dashboard(dashboard)
 
     def test_specialized_query_panels_can_be_renamed_and_nested(self):
         panels = self.dashboard["panels"]
