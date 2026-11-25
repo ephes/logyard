@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject unsupported visualization types in provisioned dashboard panels,
+  including saved children in collapsed rows.
 - Reject provisioned dashboards missing any of the specialized panel IDs 3, 7
   and 9.
 - Validate the built-in dashboard annotation's Grafana datasource and require
@@ -13,7 +15,8 @@
 - Refuse dashboards with more than 65,536 decoded JSON nodes before semantic checks.
 - Size dashboard read requests to the checked file size plus one byte.
 - Keep contiguous query spans when removing LogQL comments, reducing temporary allocations.
-- Reject surrounding whitespace in dashboard target `refId` values.
+- Require dashboard target `refId` values to contain 1 to 64 ASCII letters,
+  digits, underscores or hyphens.
 - Reuse parsed selector matchers when checking the required dashboard dropdown scope.
 - Share full-query variable references between dashboard target scope checks.
 - Check dashboard overlaps between neighboring vertical intervals in each Grafana grid column.
