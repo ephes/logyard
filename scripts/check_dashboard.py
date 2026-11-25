@@ -29,6 +29,7 @@ GRAFANA = {"type": "grafana", "uid": "-- Grafana --"}
 QUERY_MODES = {"stat": "instant", "bargauge": "instant",
                "logs": "range", "timeseries": "range"}
 NON_QUERY_PANEL_TYPES = {"text", "row"}
+TARGET_REF_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
 BUILTINS = {
     "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
@@ -581,6 +582,9 @@ def validate_dashboard(dashboard):
                     ref_id = target["refId"]
                     if ref_id != ref_id.strip():
                         raise ValueError(f"panel {panel_id}: target refId must not have surrounding whitespace")
+                    require(TARGET_REF_ID.fullmatch(ref_id),
+                            f"panel {panel_id}: invalid target refId "
+                            "(use 1 to 64 ASCII letters, digits, underscores or hyphens)")
                     query_fields.add((id(target), "expr"))
                     check_reference_syntax(target["expr"], f"panel {panel_id}: invalid target")
                     check_references(target["expr"], logql=True)

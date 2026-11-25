@@ -248,6 +248,20 @@ class DashboardAssetTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "target refId must not have surrounding whitespace"):
                         validate_dashboard(dashboard)
 
+    def test_target_refids_reject_controls_and_excess_length(self):
+        target = self.dashboard["panels"][1]["targets"][0]
+        for ref_id in ("inside\ncontrol", "A" * 65, "target\x7f", "targetä", "target B"):
+            with self.subTest(ref_id=ref_id):
+                target["refId"] = ref_id
+                with self.assertRaisesRegex(ValueError, "panel 2: invalid target refId"):
+                    validate_dashboard(self.dashboard)
+
+    def test_target_refids_accept_distinct_ids_at_length_boundaries(self):
+        targets = self.dashboard["panels"][1]["targets"]
+        targets.append(dict(targets[0], refId="helper_2-" + "x" * 55))
+        self.assertEqual(len(targets[-1]["refId"]), 64)
+        validate_dashboard(self.dashboard)
+
     def test_target_refids_are_scoped_to_each_panel(self):
         panel = self.dashboard["panels"][1]
         other = copy.deepcopy(panel)
@@ -261,7 +275,7 @@ class DashboardAssetTests(unittest.TestCase):
     def test_duplicate_target_refid_diagnostic_is_built_only_on_failure(self):
         panel = self.dashboard["panels"][1]
         template = panel["targets"][0]
-        duplicate_ref = "target-duplicate\n" + "x" * 200
+        duplicate_ref = "target-duplicate"
         refs = [f"target-{index}" for index in range(64)] + [duplicate_ref]
         panel["targets"] = [dict(template, refId=ref) for ref in refs]
         ref_set = set(refs)
@@ -835,6 +849,8 @@ class DashboardAdmissionTests(unittest.TestCase):
         dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
         target = dashboard["panels"][1]["targets"][0]
         target["refId"] = controls + "界" * 20000
+        cases.append((copy.deepcopy(dashboard), "invalid target refId"))
+        target["refId"] = "A"
         target["expr"] = '{host="unscoped"}'
         cases.append((dashboard, "invalid query scope"))
         for dashboard, diagnostic in cases:

@@ -100,10 +100,10 @@ panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
 Panel IDs and `schemaVersion` must be positive browser-safe integers, at most
 9,007,199,254,740,991 (JavaScript's `Number.MAX_SAFE_INTEGER`).
-Each target `refId` must be nonempty and use its stripped spelling, with no
-leading or trailing whitespace. Different panels may reuse a target `refId`.
-The duplicate check compares full references and builds a bounded preview only
-when it finds a duplicate.
+Each target `refId` must contain 1 to 64 characters from `A–Z`, `a–z`, `0–9`,
+`_` or `-`. Different panels may reuse a target `refId`. The duplicate check
+compares full references case-sensitively and builds a preview only when it
+finds a duplicate.
 Each query panel must have at least one visible target: `hide` must be a
 boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target.
