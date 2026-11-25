@@ -42,6 +42,20 @@ class DashboardAssetTests(unittest.TestCase):
     def test_committed_dashboard(self):
         validate_dashboard(self.dashboard)
 
+    def test_dashboard_auto_refresh_can_be_explicitly_disabled(self):
+        self.dashboard["refresh"] = ""
+        validate_dashboard(self.dashboard)
+
+    def test_dashboard_auto_refresh_requires_the_provisioned_profile(self):
+        for value in ("1s", "30s", "10s ", False, None, 10, []):
+            with self.subTest(refresh=value):
+                self.dashboard["refresh"] = value
+                with self.assertRaisesRegex(ValueError, r"^refresh must be 10s or an empty string$"):
+                    validate_dashboard(self.dashboard)
+        del self.dashboard["refresh"]
+        with self.assertRaisesRegex(ValueError, r"^refresh must be 10s or an empty string$"):
+            validate_dashboard(self.dashboard)
+
     def test_rejects_unknown_panel_types_including_rows(self):
         for nested in (False, True):
             with self.subTest(nested=nested):
@@ -674,7 +688,7 @@ def synthetic_dashboard():
         level='source_type="journald", host=~"$host", service=~"$service"',
     )
     return dict(
-        uid="logyard-home", title="Synthetic", schemaVersion=1,
+        uid="logyard-home", title="Synthetic", schemaVersion=1, refresh="10s",
         templating=dict(list=[
             dict(name=name, type="query", includeAll=True, query=f"label_values({{{scope}}}, {name})",
                  datasource=dict(type="loki", uid="logyard-loki"))
@@ -691,6 +705,21 @@ class DashboardVariableGraphTests(unittest.TestCase):
         "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
         "__auto", "__from", "__to",
     )
+
+    def test_declared_variable_name_length_limit(self):
+        dashboard = synthetic_dashboard()
+        variable = dict(
+            name="_" + "a0" * 31 + "Z", type="query", query="literal",
+            datasource=dict(type="loki", uid="logyard-loki"),
+        )
+        dashboard["templating"]["list"].append(variable)
+        dashboard["description"] = "${" + variable["name"] + "}"
+        validate_dashboard(dashboard)
+
+        variable["name"] += "Z"
+        dashboard["description"] = "${" + variable["name"] + "}"
+        with self.assertRaisesRegex(ValueError, r"^variable name exceeds 64 characters$"):
+            validate_dashboard(dashboard)
 
     def test_builtin_names_are_reserved_for_definitions(self):
         for name in self.BUILTIN_NAMES:
@@ -844,8 +873,7 @@ class DashboardAdmissionTests(unittest.TestCase):
             cases.append((dashboard, "panel id"))
         dashboard = synthetic_dashboard()
         dashboard["templating"]["list"][0]["name"] = "v" * 20000
-        dashboard["templating"]["list"][0]["type"] = "custom"
-        cases.append((dashboard, "expected query variable"))
+        cases.append((dashboard, "variable name exceeds 64 characters"))
         dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
         target = dashboard["panels"][1]["targets"][0]
         target["refId"] = controls + "界" * 20000

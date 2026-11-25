@@ -23,6 +23,7 @@ MAX_PANELS = 256
 GRID_COLUMNS = 24
 MAX_SAFE_INTEGER = 2**53 - 1  # JavaScript Number.MAX_SAFE_INTEGER
 MAX_VARIABLES = 256
+MAX_VARIABLE_NAME_LENGTH = 64
 MAX_DIAGNOSTIC_BYTES = 1024
 LOKI = {"type": "loki", "uid": "logyard-loki"}
 GRAFANA = {"type": "grafana", "uid": "-- Grafana --"}
@@ -475,6 +476,8 @@ def validate_dashboard(dashboard):
     version = dashboard.get("schemaVersion")
     require(type(version) is int and 0 < version <= MAX_SAFE_INTEGER,
             "schemaVersion must be a positive browser-safe integer")
+    require(dashboard.get("refresh") in ("10s", ""),
+            "refresh must be 10s or an empty string")
     check_annotations(dashboard.get("annotations", {}))
     templating = dashboard.get("templating")
     require(isinstance(templating, dict), "templating must be an object")
@@ -485,8 +488,10 @@ def validate_dashboard(dashboard):
     for variable in variables:
         require(isinstance(variable, dict), "variable must be an object")
         name = variable.get("name")
-        require(isinstance(name, str) and re.fullmatch(r"[A-Za-z_]\w*", name, re.ASCII),
-                "variable needs a valid name")
+        require(isinstance(name, str), "variable needs a valid name")
+        require(len(name) <= MAX_VARIABLE_NAME_LENGTH,
+                f"variable name exceeds {MAX_VARIABLE_NAME_LENGTH} characters")
+        require(re.fullmatch(r"[A-Za-z_]\w*", name, re.ASCII), "variable needs a valid name")
         display_name = diagnostic_text(name)
         require(name not in BUILTINS, f"reserved variable name {display_name}")
         require(name not in names, f"duplicate variable {display_name}")

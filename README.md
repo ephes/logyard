@@ -98,6 +98,9 @@ snapshot or detect every possible write on filesystems with coarse timestamps.
 It validates required dashboard/panel/query fields, unique
 panel ids (including nested rows), unique target `refId` values within each
 query panel, the `logyard-loki` datasource and defined variable references.
+The dashboard's top-level `refresh` must be `"10s"` for the provisioned
+Loki query cadence or `""` to explicitly disable auto-refresh. The checker
+rejects missing values, other intervals and other types.
 Panel IDs and `schemaVersion` must be positive browser-safe integers, at most
 9,007,199,254,740,991 (JavaScript's `Number.MAX_SAFE_INTEGER`).
 Each target `refId` must contain 1 to 64 characters from `A–Z`, `a–z`, `0–9`,
@@ -234,8 +237,11 @@ The check accepts `$name`, `${name:format}` and
 Reference matching follows Grafana's variable pattern: ASCII names (as in
 JavaScript, so `$hostä` refers to `host`), `[[name:format]]` only with a word
 format, and `${name.fieldPath:format}` field paths, so these count for
-undefined-variable, dependency and interpolation checks too. Variable names must
-be ASCII. In target `expr` and variable `query` fields, every `${` must start such
+undefined-variable, dependency and interpolation checks too. Declared variable
+names must contain 1 to 64 ASCII characters, starting with a letter or
+underscore and continuing with letters, digits or underscores. The checker
+rejects longer names before collecting them and omits the name from the error.
+In target `expr` and variable `query` fields, every `${` must start such
 a reference with a field path and format of at most 128 characters each, and
 reference text cannot contain `"`, a backtick, `#`, `{`, `$`, `[`, `]` or a
 newline; otherwise the check fails with `unsupported variable reference syntax`.
