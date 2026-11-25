@@ -42,6 +42,20 @@ class DashboardAssetTests(unittest.TestCase):
     def test_committed_dashboard(self):
         validate_dashboard(self.dashboard)
 
+    def test_dashboard_auto_refresh_can_be_explicitly_disabled(self):
+        self.dashboard["refresh"] = ""
+        validate_dashboard(self.dashboard)
+
+    def test_dashboard_auto_refresh_requires_the_provisioned_profile(self):
+        for value in ("1s", "30s", "10s ", False, None, 10, []):
+            with self.subTest(refresh=value):
+                self.dashboard["refresh"] = value
+                with self.assertRaisesRegex(ValueError, r"^refresh must be 10s or an empty string$"):
+                    validate_dashboard(self.dashboard)
+        del self.dashboard["refresh"]
+        with self.assertRaisesRegex(ValueError, r"^refresh must be 10s or an empty string$"):
+            validate_dashboard(self.dashboard)
+
     def test_rejects_unknown_panel_types_including_rows(self):
         for nested in (False, True):
             with self.subTest(nested=nested):
@@ -674,7 +688,7 @@ def synthetic_dashboard():
         level='source_type="journald", host=~"$host", service=~"$service"',
     )
     return dict(
-        uid="logyard-home", title="Synthetic", schemaVersion=1,
+        uid="logyard-home", title="Synthetic", schemaVersion=1, refresh="10s",
         templating=dict(list=[
             dict(name=name, type="query", includeAll=True, query=f"label_values({{{scope}}}, {name})",
                  datasource=dict(type="loki", uid="logyard-loki"))

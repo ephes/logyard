@@ -476,6 +476,8 @@ def validate_dashboard(dashboard):
     version = dashboard.get("schemaVersion")
     require(type(version) is int and 0 < version <= MAX_SAFE_INTEGER,
             "schemaVersion must be a positive browser-safe integer")
+    require(dashboard.get("refresh") in ("10s", ""),
+            "refresh must be 10s or an empty string")
     check_annotations(dashboard.get("annotations", {}))
     templating = dashboard.get("templating")
     require(isinstance(templating, dict), "templating must be an object")
