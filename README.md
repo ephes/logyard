@@ -121,7 +121,7 @@ Other labels can combine multiple matchers subject to the existing selector rule
 Ordinary panels also require `level=~"$level"`. The error panels (IDs 3 and 9)
 require `level=~"error|critical|alert|emerg"`. Log Volume by Level (ID 7) must omit
 level matchers to compare all levels. These exceptions cannot reference `$level`.
-When present, these IDs must belong to supported query panels. ID 3 requires
+The dashboard must contain query panels with all three IDs. ID 3 requires
 `instant` targets, while IDs 7 and 9 require `range` targets. These roles follow
 the panel IDs through title changes and moves into collapsed rows.
 Selector values for `host`, `service` and `level` allow `$name`, `${name}` and

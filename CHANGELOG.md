@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject provisioned dashboards missing any of the specialized panel IDs 3, 7
+  and 9.
 - Validate the built-in dashboard annotation's Grafana datasource and require
   additional annotation queries to be explicitly disabled with a hidden toggle.
 - Require the specialized dashboard panel IDs to retain query panels with their

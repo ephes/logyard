@@ -628,6 +628,9 @@ def validate_dashboard(dashboard):
                         f"and {diagnostic_text(siblings[second]['id'])} overlap"
                     )
 
+    for panel_id in SPECIALIZED_PANEL_MODES:
+        require(panel_id in panel_ids, f"missing required panel {panel_id}")
+
     dependencies = {
         # Grafana finds dependencies in the whole query text, comments included.
         variable["name"]: variable_references(variable["query"]) & names

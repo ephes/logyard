@@ -26,6 +26,15 @@ def row(children, collapsed=True):
     )
 
 
+def required_panels():
+    dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
+    panels = [panel for panel in dashboard["panels"] if panel["id"] in (3, 7, 9)]
+    # Keep the provisioned roles clear of the synthetic layouts under test.
+    for panel in panels:
+        panel["gridPos"]["y"] += 300
+    return panels
+
+
 class DashboardAssetTests(unittest.TestCase):
     def setUp(self):
         self.dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
@@ -142,7 +151,7 @@ class DashboardAssetTests(unittest.TestCase):
         self.dashboard["panels"] = [
             row([], collapsed=False),
             dict(id=100, title="Child", type="text", gridPos=dict(x=0, y=101, w=24, h=2)),
-        ]
+        ] + required_panels()
         validate_dashboard(self.dashboard)
 
     def test_grid_overlap_is_rejected(self):
@@ -161,7 +170,7 @@ class DashboardAssetTests(unittest.TestCase):
                 self.dashboard["panels"] = [
                     dict(id=1, title="First", type="text", gridPos=dict(x=0, y=0, w=6, h=4)),
                     dict(id=2, title="Second", type="text", gridPos=dict(x=x, y=y, w=6, h=4)),
-                ]
+                ] + required_panels()
                 validate_dashboard(self.dashboard)
 
     def test_grid_positions_are_bounded_integers(self):
@@ -302,7 +311,7 @@ class DashboardAssetTests(unittest.TestCase):
         self.dashboard["panels"] = [
             dict(id=1, title="Text", type="text", gridPos=dict(x=0, y=0, w=24, h=2)),
             row([]),
-        ]
+        ] + required_panels()
         validate_dashboard(self.dashboard)
 
     def test_specialized_panel_ids_require_query_panels_including_rows(self):
@@ -371,7 +380,7 @@ class DashboardAssetTests(unittest.TestCase):
         panel = dict(id=100, title="Text", type="text", gridPos=dict(x=0, y=0, w=24, h=2))
         stale_targets = [dict(refId="A", expr='{source_type="synthetic"}')]
         for panels in ([panel], [row([panel])]):
-            self.dashboard["panels"] = panels
+            self.dashboard["panels"] = panels + required_panels()
             for targets in (stale_targets, {}, "", None, False, ()):
                 with self.subTest(nested=panels[0] is not panel, targets=targets):
                     panel["targets"] = targets
@@ -604,6 +613,22 @@ class DashboardAssetTests(unittest.TestCase):
                     self.assertIn("Invalid dashboard", result.stderr)
                     self.assertNotIn("Traceback", result.stderr)
 
+    def test_cli_rejects_each_missing_specialized_panel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.json"
+            for panel_id in (3, 7, 9):
+                with self.subTest(panel_id=panel_id):
+                    dashboard = dict(self.dashboard, panels=[
+                        panel for panel in self.dashboard["panels"] if panel["id"] != panel_id
+                    ])
+                    path.write_text(json.dumps(dashboard), encoding="utf-8")
+                    result = subprocess.run(
+                        [sys.executable, "-m", "scripts.check_dashboard", str(path)],
+                        cwd=DEFAULT_PATH.parents[4], capture_output=True, text=True, timeout=5,
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(f"missing required panel {panel_id}", result.stderr)
+
 
 def synthetic_dashboard():
     scopes = dict(
@@ -619,7 +644,7 @@ def synthetic_dashboard():
             for name, scope in scopes.items()
         ]),
         panels=[dict(id=1, title="Text", type="text",
-                     gridPos=dict(x=0, y=0, w=24, h=1))],
+                     gridPos=dict(x=0, y=0, w=24, h=1))] + required_panels(),
     )
 
 
@@ -1098,8 +1123,10 @@ class DashboardPanelBudgetTests(unittest.TestCase):
         dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
         prototype = dashboard["panels"][0]
         prototype.pop("options")  # Omit bulky operator notes in the compact fixture.
-        dashboard["panels"] = []
-        for index in range(count):
+        dashboard["panels"] = required_panels()
+        for index, panel in enumerate(dashboard["panels"]):
+            panel["gridPos"] = dict(x=0, y=index, w=1, h=1)
+        for index in range(len(dashboard["panels"]), count):
             panel = copy.deepcopy(prototype)
             # Keep synthetic text panels clear of the provisioned query roles.
             panel.update(id=1000 + index, gridPos=dict(x=0, y=index, w=1, h=1))
@@ -1158,7 +1185,7 @@ class DashboardPanelBudgetTests(unittest.TestCase):
                 with self.subTest(nested=nested, count=count):
                     dashboard = self.dashboard_with_panels(count)
                     if nested:
-                        children = dashboard["panels"][2:]
+                        children = dashboard["panels"][:-2]
                         inner = row(children)
                         inner["id"] = 2
                         outer = row([inner])
@@ -1349,7 +1376,7 @@ class DashboardChildGridTests(unittest.TestCase):
                 dashboard = synthetic_dashboard()
                 children = self.query_children()
                 children[1]["gridPos"].update(x=x, y=y)
-                dashboard["panels"] = [row(children)]
+                dashboard["panels"] = [row(children)] + required_panels()
                 validate_dashboard(dashboard)
 
     def test_saved_siblings_use_grid_columns_and_report_ids_in_sibling_order(self):
@@ -1357,7 +1384,7 @@ class DashboardChildGridTests(unittest.TestCase):
         lower, upper = self.query_children()
         lower["gridPos"].update(x=23, y=4, w=1)
         upper["gridPos"].update(x=22, y=0, w=2)
-        dashboard["panels"] = [row([lower, upper])]
+        dashboard["panels"] = [row([lower, upper])] + required_panels()
         validate_dashboard(dashboard)
 
         lower["gridPos"]["y"] = 3
@@ -1408,7 +1435,7 @@ class DashboardChildGridTests(unittest.TestCase):
         inner = row([child])
         outer = row([inner])
         outer["id"] = 98
-        dashboard["panels"] = [outer]
+        dashboard["panels"] = [outer] + required_panels()
         validate_dashboard(dashboard)
 
 
