@@ -109,6 +109,10 @@ boolean when present and defaults to false
 when omitted. Hidden helper targets are allowed alongside a visible target.
 Text panels and row headers may omit `targets` or use an
 empty list. Put query targets on data panels, including saved children of rows.
+The provisioned asset supports panel types `text`, `row`, `stat`, `bargauge`,
+`logs` and `timeseries`, including inside collapsed rows. To add a visualization,
+register its required query mode in `QUERY_MODES` or add a query-free type to
+`NON_QUERY_PANEL_TYPES` in `scripts/check_dashboard.py`.
 Every target must explicitly set `queryType` to `instant` or `range`. Stat and
 bar-gauge panels require `instant`; logs and time-series panels require `range`.
 Hidden helper targets follow the same mode contract as visible targets.

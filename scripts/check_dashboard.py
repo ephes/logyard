@@ -28,6 +28,7 @@ LOKI = {"type": "loki", "uid": "logyard-loki"}
 GRAFANA = {"type": "grafana", "uid": "-- Grafana --"}
 QUERY_MODES = {"stat": "instant", "bargauge": "instant",
                "logs": "range", "timeseries": "range"}
+NON_QUERY_PANEL_TYPES = {"text", "row"}
 # Grafana/Loki globals supported in dashboard queries; unknown names fail closed.
 BUILTINS = {
     "__interval", "__interval_ms", "__range", "__range_s", "__range_ms",
@@ -540,11 +541,13 @@ def validate_dashboard(dashboard):
             if required_type is not None:
                 require(panel_type == required_type,
                         f"panel {panel_id}: requires type {required_type}")
+            if panel_type not in QUERY_MODES and panel_type not in NON_QUERY_PANEL_TYPES:
+                raise ValueError(f"panel {panel_id}: unsupported panel type {diagnostic_text(panel_type)}")
             expected_mode = QUERY_MODES.get(panel_type)
             if panel_type == "row":
                 require(type(panel.get("collapsed")) is bool,
                         f"panel {panel_id}: row collapsed must be a boolean")
-            if panel_type in ("text", "row"):
+            if panel_type in NON_QUERY_PANEL_TYPES:
                 require(panel.get("targets", []) == [],
                         f"panel {panel_id}: {panel_type} must not declare targets")
             if "panels" in panel:
@@ -562,7 +565,7 @@ def validate_dashboard(dashboard):
                     f"panel {panel_id}: gridPos must fit the {GRID_COLUMNS}-column grid")
             require(y <= MAX_SAFE_INTEGER and h <= MAX_SAFE_INTEGER - y,
                     f"panel {panel_id}: gridPos bottom exceeds the browser-safe integer limit")
-            if panel_type not in ("text", "row"):
+            if expected_mode is not None:
                 require(panel.get("datasource") == LOKI,
                         f"panel {panel_id}: expected Loki datasource {LOKI}")
                 targets = panel.get("targets")
@@ -591,7 +594,7 @@ def validate_dashboard(dashboard):
                     mode = target.get("queryType")
                     require(mode in ("instant", "range"),
                             f"panel {panel_id}: target queryType must be instant or range")
-                    require(expected_mode is None or mode == expected_mode,
+                    require(mode == expected_mode,
                             f"panel {panel_id}: {diagnostic_text(panel_type)} target queryType must be {expected_mode}")
                     check_target_scope(panel, target, names)
                 require(any(not target.get("hide", False) for target in targets),

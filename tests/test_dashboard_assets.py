@@ -42,6 +42,17 @@ class DashboardAssetTests(unittest.TestCase):
     def test_committed_dashboard(self):
         validate_dashboard(self.dashboard)
 
+    def test_rejects_unknown_panel_types_including_rows(self):
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                dashboard = copy.deepcopy(self.dashboard)
+                panel = dashboard["panels"][1]
+                panel["type"] = "stats"
+                if nested:
+                    dashboard["panels"][1] = row([panel])
+                with self.assertRaisesRegex(ValueError, "panel 2: unsupported panel type stats"):
+                    validate_dashboard(dashboard)
+
     def test_builtin_annotation_requires_grafana_datasource_object(self):
         annotation = self.dashboard["annotations"]["list"][0]
         for datasource in (

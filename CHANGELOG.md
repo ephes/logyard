@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject unsupported visualization types in provisioned dashboard panels,
+  including saved children in collapsed rows.
 - Reject provisioned dashboards missing any of the specialized panel IDs 3, 7
   and 9.
 - Validate the built-in dashboard annotation's Grafana datasource and require
