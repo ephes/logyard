@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Limit declared dashboard variable names to 64 ASCII identifier characters.
 - Reject unsupported visualization types in provisioned dashboard panels,
   including saved children in collapsed rows.
 - Reject provisioned dashboards missing any of the specialized panel IDs 3, 7

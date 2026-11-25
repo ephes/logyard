@@ -692,6 +692,21 @@ class DashboardVariableGraphTests(unittest.TestCase):
         "__auto", "__from", "__to",
     )
 
+    def test_declared_variable_name_length_limit(self):
+        dashboard = synthetic_dashboard()
+        variable = dict(
+            name="_" + "a0" * 31 + "Z", type="query", query="literal",
+            datasource=dict(type="loki", uid="logyard-loki"),
+        )
+        dashboard["templating"]["list"].append(variable)
+        dashboard["description"] = "${" + variable["name"] + "}"
+        validate_dashboard(dashboard)
+
+        variable["name"] += "Z"
+        dashboard["description"] = "${" + variable["name"] + "}"
+        with self.assertRaisesRegex(ValueError, r"^variable name exceeds 64 characters$"):
+            validate_dashboard(dashboard)
+
     def test_builtin_names_are_reserved_for_definitions(self):
         for name in self.BUILTIN_NAMES:
             with self.subTest(name=name):
@@ -844,8 +859,7 @@ class DashboardAdmissionTests(unittest.TestCase):
             cases.append((dashboard, "panel id"))
         dashboard = synthetic_dashboard()
         dashboard["templating"]["list"][0]["name"] = "v" * 20000
-        dashboard["templating"]["list"][0]["type"] = "custom"
-        cases.append((dashboard, "expected query variable"))
+        cases.append((dashboard, "variable name exceeds 64 characters"))
         dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
         target = dashboard["panels"][1]["targets"][0]
         target["refId"] = controls + "界" * 20000

@@ -234,8 +234,11 @@ The check accepts `$name`, `${name:format}` and
 Reference matching follows Grafana's variable pattern: ASCII names (as in
 JavaScript, so `$hostä` refers to `host`), `[[name:format]]` only with a word
 format, and `${name.fieldPath:format}` field paths, so these count for
-undefined-variable, dependency and interpolation checks too. Variable names must
-be ASCII. In target `expr` and variable `query` fields, every `${` must start such
+undefined-variable, dependency and interpolation checks too. Declared variable
+names must contain 1 to 64 ASCII characters, starting with a letter or
+underscore and continuing with letters, digits or underscores. The checker
+rejects longer names before collecting them and omits the name from the error.
+In target `expr` and variable `query` fields, every `${` must start such
 a reference with a field path and format of at most 128 characters each, and
 reference text cannot contain `"`, a backtick, `#`, `{`, `$`, `[`, `]` or a
 newline; otherwise the check fails with `unsupported variable reference syntax`.
