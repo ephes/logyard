@@ -137,6 +137,8 @@ The dashboard must contain all three specialized panels. ID 3 must be a
 `stat` panel with `instant` targets, ID 7 a `timeseries` panel with `range`
 targets, and ID 9 a `logs` panel with `range` targets. These roles follow the
 panel IDs through title changes and moves into collapsed rows.
+These panels follow the time range selected in the dashboard time picker.
+Leave their saved `timeFrom` field absent, `null` or an empty string.
 Selector values for `host`, `service` and `level` allow `$name`, `${name}` and
 `[[name]]` only inside double-quoted strings. All explicit formatters, including
 `:regex`, `:raw` and `:text`, are rejected, including in additional matchers

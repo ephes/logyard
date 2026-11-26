@@ -424,6 +424,28 @@ class DashboardAssetTests(unittest.TestCase):
         panels.append(row([panel]))
         validate_dashboard(self.dashboard)
 
+    def test_specialized_panels_reject_relative_time_overrides(self):
+        for panel_id in (3, 7, 9):
+            for nested in (False, True):
+                with self.subTest(panel_id=panel_id, nested=nested):
+                    dashboard = copy.deepcopy(self.dashboard)
+                    panels = dashboard["panels"]
+                    panel = next(panel for panel in panels if panel["id"] == panel_id)
+                    panel["timeFrom"] = "15m"
+                    if nested:
+                        panels.remove(panel)
+                        panels.append(row([panel]))
+                    with self.assertRaisesRegex(ValueError, f"panel {panel_id}: timeFrom must be unset"):
+                        validate_dashboard(dashboard)
+
+    def test_specialized_panels_accept_cleared_relative_time_overrides(self):
+        for cleared in (None, ""):
+            with self.subTest(cleared=cleared):
+                for panel in self.dashboard["panels"]:
+                    if panel["id"] in (3, 7, 9):
+                        panel["timeFrom"] = cleared
+                validate_dashboard(self.dashboard)
+
     def test_misplaced_targets_are_rejected_on_nested_rows(self):
         dashboard = copy.deepcopy(self.dashboard)
         panels = dashboard["panels"]

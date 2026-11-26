@@ -405,6 +405,11 @@ def check_target_scope(panel, target, variable_names):
     check_scoped_interpolation(query, context)
 
 
+def check_panel_time_window(panel, panel_id):
+    require(panel.get("timeFrom") in (None, ""),
+            f"panel {panel_id}: timeFrom must be unset to use the dashboard time window")
+
+
 def _walk_dashboard(dashboard):
     """Yield nodes in reverse sibling order with one iterator per open container."""
     yield dashboard, 1, None, None
@@ -551,6 +556,7 @@ def validate_dashboard(dashboard):
             if required_type is not None:
                 require(panel_type == required_type,
                         f"panel {panel_id}: requires type {required_type}")
+                check_panel_time_window(panel, panel_id)
             if panel_type not in QUERY_MODES and panel_type not in NON_QUERY_PANEL_TYPES:
                 raise ValueError(f"panel {panel_id}: unsupported panel type {diagnostic_text(panel_type)}")
             expected_mode = QUERY_MODES.get(panel_type)
