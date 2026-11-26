@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Require the provisioned dashboard to open on the last 30 minutes.
 - Reject integers outside the browser-safe range anywhere in a dashboard,
   including extension fields.
 - Limit declared dashboard variable names to 64 ASCII identifier characters.

@@ -479,6 +479,10 @@ def validate_dashboard(dashboard):
     require(type(version) is int and version > 0, "schemaVersion must be a positive integer")
     require(dashboard.get("refresh") in ("10s", ""),
             "refresh must be 10s or an empty string")
+    time_window = dashboard.get("time")
+    require(isinstance(time_window, dict)
+            and time_window.get("from") == "now-30m" and time_window.get("to") == "now",
+            "time must specify from now-30m to now")
     check_annotations(dashboard.get("annotations", {}))
     templating = dashboard.get("templating")
     require(isinstance(templating, dict), "templating must be an object")

@@ -10,10 +10,14 @@ These assumptions are intentionally small and explicit so the deployment path st
 
 ## Dashboard Filters
 
+- The provisioned dashboard opens on the last 30 minutes (`now-30m` to `now`).
 - Every query panel is scoped to the selected `host` and `service`.
 - `level` filters Recent Logs, Log Lines, Active Services, Active Hosts and Top Services.
 - Errors and Errors and Critical Logs retain the fixed `error|critical|alert|emerg` levels regardless of `level`.
 - Log Volume by Level compares all levels within the selected host/service scope.
+
+When changing the default window, update the provisioned dashboard JSON, the
+offline checker, the synthetic dashboard fixture and this documentation together.
 
 Dashboard changes must pass the offline asset check and query regressions listed
 in the README before adoption. CI checks asset structure and synthetic selector

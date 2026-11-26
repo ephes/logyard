@@ -56,6 +56,21 @@ class DashboardAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"^refresh must be 10s or an empty string$"):
             validate_dashboard(self.dashboard)
 
+    def test_dashboard_requires_the_provisioned_default_time_window(self):
+        window = self.dashboard.pop("time")
+        message = "time must specify from now-30m to now"
+        with self.subTest(time="missing"):
+            with self.assertRaisesRegex(ValueError, message):
+                validate_dashboard(self.dashboard)
+
+        for invalid_window in (None, [], {}, {"from": "now-30m"},
+                               {"from": window["to"], "to": window["from"]},
+                               {"from": "now-1h", "to": "now"}):
+            with self.subTest(time=invalid_window):
+                self.dashboard["time"] = invalid_window
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_dashboard(self.dashboard)
+
     def test_rejects_unknown_panel_types_including_rows(self):
         for nested in (False, True):
             with self.subTest(nested=nested):
@@ -691,6 +706,7 @@ def synthetic_dashboard():
     )
     return dict(
         uid="logyard-home", title="Synthetic", schemaVersion=1, refresh="10s",
+        time={"from": "now-30m", "to": "now"},
         templating=dict(list=[
             dict(name=name, type="query", includeAll=True, query=f"label_values({{{scope}}}, {name})",
                  datasource=dict(type="loki", uid="logyard-loki"))
