@@ -406,8 +406,9 @@ def check_target_scope(panel, target, variable_names):
 
 
 def check_panel_time_window(panel, panel_id):
-    require(panel.get("timeFrom") in (None, ""),
-            f"panel {panel_id}: timeFrom must be unset to use the dashboard time window")
+    for field in ("timeFrom", "timeShift"):
+        require(panel.get(field) in (None, ""),
+                f"panel {panel_id}: {field} must be unset to use the dashboard time window")
 
 
 def _walk_dashboard(dashboard):

@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Reject saved relative time overrides on specialized dashboard panels so they
-  use the dashboard time range.
+- Reject saved relative time overrides and time shifts on specialized dashboard
+  panels so they use the dashboard time range.
 - Require the provisioned dashboard to open on the last 30 minutes.
 - Reject integers outside the browser-safe range anywhere in a dashboard,
   including extension fields.
