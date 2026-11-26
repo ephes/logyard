@@ -469,13 +469,14 @@ def validate_dashboard(dashboard):
                     f"dashboard nesting exceeds {MAX_NESTING} container levels")
         elif isinstance(value, float):
             require(math.isfinite(value), "nonfinite JSON number")
+        elif type(value) is int and not -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER:
+            raise ValueError("JSON integer outside the browser-safe integer range")
 
     require(dashboard.get("uid") == "logyard-home", "expected uid logyard-home")
     require(isinstance(dashboard.get("title"), str) and dashboard["title"].strip(),
             "dashboard needs a title")
     version = dashboard.get("schemaVersion")
-    require(type(version) is int and 0 < version <= MAX_SAFE_INTEGER,
-            "schemaVersion must be a positive browser-safe integer")
+    require(type(version) is int and version > 0, "schemaVersion must be a positive integer")
     require(dashboard.get("refresh") in ("10s", ""),
             "refresh must be 10s or an empty string")
     check_annotations(dashboard.get("annotations", {}))
@@ -532,8 +533,7 @@ def validate_dashboard(dashboard):
         for panel_index, panel in enumerate(panels):
             require(isinstance(panel, dict), "panel must be an object")
             panel_id = panel.get("id")
-            require(type(panel_id) is int and 0 < panel_id <= MAX_SAFE_INTEGER
-                    and panel_id not in panel_ids,
+            require(type(panel_id) is int and panel_id > 0 and panel_id not in panel_ids,
                     f"invalid or duplicate panel id at index {panel_index}")
             panel_ids.add(panel_id)
             required_type = SPECIALIZED_PANEL_TYPES.get(panel_id)
@@ -569,7 +569,7 @@ def validate_dashboard(dashboard):
             x, y, w, h = (grid[key] for key in ("x", "y", "w", "h"))
             require(x >= 0 and y >= 0 and w > 0 and h > 0 and x + w <= GRID_COLUMNS,
                     f"panel {panel_id}: gridPos must fit the {GRID_COLUMNS}-column grid")
-            require(y <= MAX_SAFE_INTEGER and h <= MAX_SAFE_INTEGER - y,
+            require(y + h <= MAX_SAFE_INTEGER,
                     f"panel {panel_id}: gridPos bottom exceeds the browser-safe integer limit")
             if expected_mode is not None:
                 require(panel.get("datasource") == LOKI,

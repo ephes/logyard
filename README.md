@@ -73,8 +73,11 @@ The asset check rejects duplicate JSON object keys at every depth, including
 identical values and escaped spellings of the same key. Inputs must be standard
 JSON: `NaN`, `Infinity`, `-Infinity` and numbers that overflow to infinity
 are rejected, including in extension/annotation options and when calling the
-validator directly. Finite numeric values and strings containing these words
-remain supported. JSON object keys and string values must consist of Unicode
+validator directly. Decoded JSON integers must be between
+−9,007,199,254,740,991 and 9,007,199,254,740,991, inclusive, throughout the
+asset. Store opaque identifiers outside this range as strings. Finite
+floating-point values and strings containing these words remain supported.
+JSON object keys and string values must consist of Unicode
 scalar values, including in extensions and annotations. An unpaired surrogate
 escape fails with the fixed diagnostic `dashboard text contains a Unicode
 surrogate`. Paired escapes for supplementary characters are accepted. Inputs
