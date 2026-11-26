@@ -56,6 +56,21 @@ class DashboardAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"^refresh must be 10s or an empty string$"):
             validate_dashboard(self.dashboard)
 
+    def test_dashboard_requires_the_provisioned_default_time_window(self):
+        window = self.dashboard.pop("time")
+        message = "time must specify from now-30m to now"
+        with self.subTest(time="missing"):
+            with self.assertRaisesRegex(ValueError, message):
+                validate_dashboard(self.dashboard)
+
+        for invalid_window in (None, [], {}, {"from": "now-30m"},
+                               {"from": window["to"], "to": window["from"]},
+                               {"from": "now-1h", "to": "now"}):
+            with self.subTest(time=invalid_window):
+                self.dashboard["time"] = invalid_window
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_dashboard(self.dashboard)
+
     def test_rejects_unknown_panel_types_including_rows(self):
         for nested in (False, True):
             with self.subTest(nested=nested):
@@ -139,14 +154,14 @@ class DashboardAssetTests(unittest.TestCase):
         self.dashboard["panels"][0]["id"] = first_id
         self.dashboard["panels"][1]["id"] = second_id
 
-        with self.assertRaisesRegex(ValueError, "panel id"):
+        with self.assertRaisesRegex(ValueError, "browser-safe integer range"):
             validate_dashboard(self.dashboard)
 
     def test_schema_version_must_be_a_browser_safe_integer(self):
         self.dashboard["schemaVersion"] = 2**53 - 1
         validate_dashboard(self.dashboard)
         self.dashboard["schemaVersion"] += 1
-        with self.assertRaisesRegex(ValueError, "schemaVersion"):
+        with self.assertRaisesRegex(ValueError, "browser-safe integer range"):
             validate_dashboard(self.dashboard)
 
     def test_only_collapsed_rows_can_store_children(self):
@@ -220,10 +235,12 @@ class DashboardAssetTests(unittest.TestCase):
         self.dashboard["panels"].append(row([child]))
         validate_dashboard(self.dashboard)
 
-        for y, h in ((limit - 1, 3), (limit + 1, 1), (0, limit + 1)):
+        for y, h, message in ((limit - 1, 3, "gridPos bottom"),
+                              (limit + 1, 1, "browser-safe integer range"),
+                              (0, limit + 1, "browser-safe integer range")):
             with self.subTest(y=y, h=h):
                 child["gridPos"].update(y=y, h=h)
-                with self.assertRaisesRegex(ValueError, "gridPos"):
+                with self.assertRaisesRegex(ValueError, message):
                     validate_dashboard(self.dashboard)
 
     def test_collapsed_row_children_do_not_occupy_top_level_grid(self):
@@ -689,6 +706,7 @@ def synthetic_dashboard():
     )
     return dict(
         uid="logyard-home", title="Synthetic", schemaVersion=1, refresh="10s",
+        time={"from": "now-30m", "to": "now"},
         templating=dict(list=[
             dict(name=name, type="query", includeAll=True, query=f"label_values({{{scope}}}, {name})",
                  datasource=dict(type="loki", uid="logyard-loki"))
@@ -924,9 +942,20 @@ class DashboardAdmissionTests(unittest.TestCase):
         content = json.dumps(dashboard)[:-1] + ',"extension":1e999}'
         self.assert_invalid(self.run_cli(content.encode("utf-8")), "nonfinite JSON number")
 
+    def test_unsafe_integers_in_dashboard_extensions_are_rejected(self):
+        dashboard = synthetic_dashboard()
+        for value in (2**53 + 1, -(2**53 + 1)):
+            with self.subTest(value=value):
+                dashboard["extension"] = {"options": [dict(value=value)]}
+                with self.assertRaisesRegex(ValueError, "browser-safe integer range"):
+                    validate_dashboard(dashboard)
+                self.assert_invalid(self.run_cli(json.dumps(dashboard).encode("utf-8")),
+                                    "browser-safe integer range")
+
     def test_finite_numbers_and_constant_strings_remain_valid(self):
         dashboard = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
-        dashboard["extension"] = [0, -1, 1.25, 1e308, 10**100, "NaN", "Infinity"]
+        limit = 2**53 - 1
+        dashboard["extension"] = [0, -limit, limit, 1.25, 1e308, str(limit + 2), "NaN", "Infinity"]
         validate_dashboard(dashboard)
         result = self.run_cli(json.dumps(dashboard).encode("utf-8"))
         self.assertEqual(result.returncode, 0, result.stderr)

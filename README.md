@@ -73,8 +73,11 @@ The asset check rejects duplicate JSON object keys at every depth, including
 identical values and escaped spellings of the same key. Inputs must be standard
 JSON: `NaN`, `Infinity`, `-Infinity` and numbers that overflow to infinity
 are rejected, including in extension/annotation options and when calling the
-validator directly. Finite numeric values and strings containing these words
-remain supported. JSON object keys and string values must consist of Unicode
+validator directly. Decoded JSON integers must be between
+−9,007,199,254,740,991 and 9,007,199,254,740,991, inclusive, throughout the
+asset. Store opaque identifiers outside this range as strings. Finite
+floating-point values and strings containing these words remain supported.
+JSON object keys and string values must consist of Unicode
 scalar values, including in extensions and annotations. An unpaired surrogate
 escape fails with the fixed diagnostic `dashboard text contains a Unicode
 surrogate`. Paired escapes for supplementary characters are accepted. Inputs
@@ -101,6 +104,8 @@ query panel, the `logyard-loki` datasource and defined variable references.
 The dashboard's top-level `refresh` must be `"10s"` for the provisioned
 Loki query cadence or `""` to explicitly disable auto-refresh. The checker
 rejects missing values, other intervals and other types.
+The top-level `time` object must set `from` to `"now-30m"` and `to` to `"now"`
+so the provisioned dashboard opens on the last 30 minutes.
 Panel IDs and `schemaVersion` must be positive browser-safe integers, at most
 9,007,199,254,740,991 (JavaScript's `Number.MAX_SAFE_INTEGER`).
 Each target `refId` must contain 1 to 64 characters from `A–Z`, `a–z`, `0–9`,
